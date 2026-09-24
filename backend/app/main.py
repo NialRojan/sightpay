@@ -21,6 +21,7 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "vision_provider": settings.vision_provider,
+            "anthropic_key": bool(settings.anthropic_api_key),
             "n8n": bool(settings.n8n_webhook_url),
             "memory": settings.memory_backend,
             "whatsapp": settings.whatsapp_mode,

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     vision_provider: str = "fixture"  # "claude" | "fixture"
     vision_fixtures_path: str = "./fixtures/vision_fixtures.json"
     anthropic_model: str = "claude-opus-5"
+    anthropic_api_key: str | None = None
     blur_threshold: float = 60.0
     dark_threshold: float = 40.0
 

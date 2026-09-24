@@ -27,7 +27,10 @@ class ClaudeVisionProvider:
     name = "claude"
 
     def __init__(self, client=None, model: str | None = None):
-        self._client = client or anthropic.Anthropic(timeout=60.0, max_retries=1)
+        if client is None:
+            kwargs = {"api_key": settings.anthropic_api_key} if settings.anthropic_api_key else {}
+            client = anthropic.Anthropic(timeout=60.0, max_retries=1, **kwargs)
+        self._client = client
         self._model = model or settings.anthropic_model
 
     def analyze(self, image_bytes: bytes, media_type: str) -> CounterAudit:

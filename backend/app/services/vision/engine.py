@@ -1,3 +1,4 @@
+import logging
 from typing import Protocol
 
 from sqlalchemy import delete
@@ -10,6 +11,7 @@ from app.services.vision.fixture_provider import FixtureVisionProvider
 from app.services.vision.quality import QualityResult, assess_quality
 from app.services.vision.schema import CounterAudit, VisionUnavailable
 
+log = logging.getLogger(__name__)
 
 class VisionProvider(Protocol):
     name: str
@@ -29,10 +31,13 @@ def analyze_bytes(data: bytes, media_type: str, provider: VisionProvider | None 
     quality = assess_quality(data)
     if quality.verdict != "ok":
         return quality, CounterAudit.unusable(f"Image is {quality.verdict}; please retake the photo"), "quality_gate"
-    provider = provider or get_vision_provider()
     try:
+        provider = provider or get_vision_provider()
         return quality, provider.analyze(data, media_type).clamped(), provider.name
-    except VisionUnavailable as exc:
+    except Exception as exc:
+        # Any provider failure (API error, missing key, bad output, bug) degrades to a low-confidence audit.
+        if not isinstance(exc, VisionUnavailable):
+            log.exception("vision provider crashed")
         return quality, CounterAudit.unusable(f"Vision unavailable: {exc}", ["analysis_failed"]), "error"
 
 

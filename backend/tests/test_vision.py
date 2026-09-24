@@ -76,3 +76,21 @@ def test_provider_failure_degrades_to_low_confidence(db):
     v = make_visit(db, world, sharp_jpeg(21))
     audit = run_vision(db, v, provider=_Down())
     assert audit.provider == "error" and "analysis_failed" in audit.suspicious_signals
+
+
+class _Crashes:
+    name = "crashes"
+
+    def analyze(self, image_bytes, media_type):
+        raise TypeError("Could not resolve authentication method")
+
+
+def test_unexpected_provider_exception_degrades_to_low_confidence(db, monkeypatch):
+    from app.services.pipeline import run_inline
+    from app.services.vision import engine
+
+    monkeypatch.setattr(engine, "get_vision_provider", lambda: _Crashes())
+    world = make_world(db)
+    v = run_inline(db, make_visit(db, world, sharp_jpeg(22)).id)
+    assert v.audit.provider == "error" and "analysis_failed" in v.audit.suspicious_signals
+    assert (v.status, v.decision) == ("escalated", "low_confidence")

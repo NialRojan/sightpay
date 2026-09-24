@@ -35,3 +35,18 @@ def test_refusal_raises_vision_unavailable():
     client = _client(SimpleNamespace(stop_reason="refusal", parsed_output=None))
     with pytest.raises(VisionUnavailable):
         ClaudeVisionProvider(client=client).analyze(b"x", "image/jpeg")
+
+
+def test_settings_read_anthropic_api_key(monkeypatch):
+    from app.config import Settings
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")
+    assert Settings().anthropic_api_key == "sk-test-123"
+
+
+def test_real_client_gets_api_key_from_settings(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-from-dotenv")
+    provider = ClaudeVisionProvider()
+    assert provider._client.api_key == "sk-from-dotenv"
