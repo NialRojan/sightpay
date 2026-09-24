@@ -18,6 +18,28 @@
 - Seed with `python -m app.seed --demo-location LAT,LNG` using the venue's coordinates. Ramesh General Store is placed
   exactly on that point and every other merchant within ~110 m of it (always under 150 m), so any merchant can be visited on stage.
 
+## Optional P1 integrations (`backend/.env`)
+
+Every key below may stay empty: the backend then uses the Hindi/Marathi templates, no audio, WhatsApp `dry_run` and SQL
+memory.
+
+- `SARVAM_API_KEY`: Sarvam translates the English guidance into the merchant's language and voices it (the voice note
+  becomes `audio_url`), and powers `/api/voice/*`. The Sarvam constants in `app/services/sarvam.py` were checked against
+  the sarvamai SDK 0.1.34 API definition: TTS sends `language_code` (`bulbul:v2`), STT uses `saaras:v3`, translate
+  uses `mayura:v1`.
+- `WHATSAPP_MODE=twilio` + `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` (+ `TWILIO_WHATSAPP_FROM`, default the Twilio
+  sandbox number) sends real WhatsApp messages. Twilio is used only when the mode is `twilio` and both credentials are
+  set; otherwise messages stay `dry_run`. Voice notes are attached only when `PUBLIC_BASE_URL` is publicly reachable
+  (Twilio cannot fetch `localhost` or LAN addresses).
+- `WHATSAPP_DEMO_TO=+91...`: **set this for demos.** Every WhatsApp goes to this number instead of the merchant's.
+- `MEMORY_BACKEND=cognee` uses Cognee for merchant memory. Install it and load the seeded history first:
+
+      pip install -e ".[memory]"
+      MEMORY_BACKEND=cognee python -m app.memory_backfill
+
+  `COGNEE_TIMEOUT_S` (default 8) caps each Cognee lookup; on timeout or error the SQL memory is used
+  (`source: "sql_fallback"`).
+
 Demo: `scripts/demo_visit.sh demo_photos/counter_bad.jpg` → non-compliant → Hindi WhatsApp guidance.
 Offline safety net: VISION_PROVIDER=fixture + photos pinned via scripts/register_fixture.py; unset N8N_WEBHOOK_URL to run inline.
 
