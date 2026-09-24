@@ -118,7 +118,7 @@ class Intervention(Base):
     __tablename__ = "interventions"
     id: Mapped[int] = mapped_column(primary_key=True)
     merchant_id: Mapped[int] = mapped_column(ForeignKey("merchants.id"), index=True)
-    visit_id: Mapped[int | None] = mapped_column(ForeignKey("visits.id"), index=True)
+    visit_id: Mapped[int | None] = mapped_column(ForeignKey("visits.id"), unique=True, index=True)
     action: Mapped[str] = mapped_column(String(40))
     issue: Mapped[str] = mapped_column(String(80))
     message_text_en: Mapped[str] = mapped_column(Text)
