@@ -70,12 +70,16 @@ def escalate(db: Session, visit: models.Visit, reason: str) -> models.Escalation
 
 
 def block_visit(db: Session, visit: models.Visit, reason: str) -> None:
+    if visit.status == "blocked":
+        return
     visit.status = "blocked"
     append_step(visit, "block", f"Visit blocked: {reason}")
     db.commit()
 
 
 def complete_visit(db: Session, visit: models.Visit) -> None:
+    if visit.completed_at is not None:
+        return
     visit.status = STATUS_BY_OUTCOME[visit.decision]
     visit.completed_at = utcnow()
     append_step(visit, "complete", f"Visit {visit.status}")
