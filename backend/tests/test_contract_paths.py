@@ -4,6 +4,7 @@ REQUIRED = {
     ("POST", "/api/visits"), ("POST", "/api/visits/{visit_id}/analyze"), ("GET", "/api/visits/{visit_id}"),
     ("GET", "/api/merchants/{merchant_id}"), ("GET", "/api/dashboard"), ("GET", "/api/escalations"),
     ("POST", "/api/escalations/{esc_id}/approve"),
+    ("GET", "/api/merchants/{merchant_id}/impact"),
 }
 
 
