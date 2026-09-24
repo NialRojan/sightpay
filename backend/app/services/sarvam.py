@@ -34,7 +34,9 @@ class SarvamClient:
     def _post(self, path: str, **kwargs) -> dict:
         try:
             res = httpx.post(f"{self._base_url}{path}", headers=self._headers, timeout=self._timeout, **kwargs)
-            res.raise_for_status()
+            if res.status_code >= 400:
+                # Sarvam explains 4xx errors (bad field, speaker/model mismatch) in the body.
+                raise SarvamError(f"{path}: HTTP {res.status_code}: {res.text[:300]}")
             return res.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise SarvamError(f"{path}: {exc}") from exc

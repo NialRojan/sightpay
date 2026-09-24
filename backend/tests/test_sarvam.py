@@ -92,3 +92,11 @@ def test_client_leaves_no_open_http_connections(monkeypatch):
     client.translate("Hello", "en-IN", "hi-IN")
     client.tts("नमस्ते", "hi-IN")
     assert opened and all(c.is_closed for c in opened)
+
+
+@respx.mock
+def test_http_error_includes_sarvam_reason():
+    respx.post(f"{API}/text-to-speech").mock(
+        return_value=httpx.Response(400, json={"error": {"message": "speaker not compatible with model"}}))
+    with pytest.raises(SarvamError, match="HTTP 400.*speaker not compatible"):
+        SarvamClient("k").tts("x", "hi-IN")
