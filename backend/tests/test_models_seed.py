@@ -37,7 +37,15 @@ def test_seed_creates_living_demo_world(db):
     assert db.scalar(select(func.count()).select_from(models.Escalation).where(models.Escalation.status == "open")) >= 1
 
 
-def test_seed_demo_location_moves_ramesh(db):
-    seed(db, today=date(2026, 9, 25), demo_location=(12.9716, 77.5946))
+def test_seed_demo_location_moves_every_merchant_to_the_venue(db):
+    from app.services.fraud.signals import haversine_m
+
+    venue = (12.9716, 77.5946)
+    seed(db, today=date(2026, 9, 25), demo_location=venue)
     ramesh = db.scalar(select(models.Merchant).where(models.Merchant.name == "Ramesh General Store"))
-    assert (ramesh.lat, ramesh.lng) == (12.9716, 77.5946)
+    assert (ramesh.lat, ramesh.lng) == venue
+    merchants = db.scalars(select(models.Merchant)).all()
+    assert len(merchants) == 24
+    for m in merchants:
+        assert haversine_m(m.lat, m.lng, *venue) <= 150, m.name
+    assert len({(m.lat, m.lng) for m in merchants}) == 24  # no two merchants on the same spot

@@ -1,6 +1,7 @@
 """Seed realistic Pune demo data.  Usage: python -m app.seed [--demo-location LAT,LNG]"""
 
 import argparse
+import math
 import random
 from datetime import date, datetime, time, timedelta
 
@@ -42,6 +43,20 @@ MERCHANTS = [  # name, owner, category, language
     ("Hotel Sahyadri", "Mahesh Pingale", "food", "mr-IN"),
     ("Krishna Provision", "Krishna Iyer", "kirana", "en-IN"),
 ]
+DEMO_SPREAD_M = (30, 50, 70, 90, 110)  # every merchant stays well inside ~150 m of the demo venue
+
+
+def _demo_spot(i: int, venue: tuple[float, float]) -> tuple[float, float]:
+    """Deterministic spot near the venue: Ramesh (i == 0) exactly on it, the others on small rings around it."""
+    lat, lng = venue
+    if i == 0:
+        return lat, lng
+    r = DEMO_SPREAD_M[i % len(DEMO_SPREAD_M)]
+    angle = math.radians(i * 137.5)  # golden angle, so neighbours do not stack
+    return (lat + r * math.cos(angle) / 111_320,
+            lng + r * math.sin(angle) / (111_320 * math.cos(math.radians(lat))))
+
+
 ACTIONS = ["reposition_paytm_qr", "clear_qr_obstruction", "install_soundbox", "reduce_competitor_dominance"]
 
 
@@ -101,8 +116,8 @@ def seed(db: Session, today: date | None = None, demo_location: tuple[float, flo
         area = area_names[i % 3]
         clat, clng = AREAS[area]
         lat, lng = clat + rng.uniform(-0.01, 0.01), clng + rng.uniform(-0.01, 0.01)
-        if i == 0 and demo_location:
-            lat, lng = demo_location
+        if demo_location:
+            lat, lng = _demo_spot(i, demo_location)
         m = models.Merchant(
             name=name, owner_name=owner, phone=f"+9198{10000000 + i:08d}", language=language,
             lat=round(lat, 6), lng=round(lng, 6), address=f"{area}, Pune", category=category,
@@ -153,7 +168,7 @@ def seed(db: Session, today: date | None = None, demo_location: tuple[float, flo
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--demo-location", help="LAT,LNG to place Ramesh General Store at the demo venue")
+    parser.add_argument("--demo-location", help="LAT,LNG of the demo venue: Ramesh General Store is placed on it, every other merchant within ~150 m")
     args = parser.parse_args()
     loc = tuple(float(x) for x in args.demo_location.split(",")) if args.demo_location else None
     Base.metadata.drop_all(engine)
