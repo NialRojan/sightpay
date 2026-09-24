@@ -7,10 +7,11 @@ import httpx
 from app.config import settings
 
 # Endpoints, field names, models and speaker checked against the sarvamai SDK 0.1.34 API definition.
+# bulbul:v2 is deprecated live ("use bulbul:v3"); v3 has its own speakers (anushka is v2-only).
 BASE_URL = "https://api.sarvam.ai"
 TRANSLATE_MODEL = "mayura:v1"  # input limit: 1000 characters
-TTS_MODEL = "bulbul:v2"
-TTS_SPEAKER = "anushka"
+TTS_MODEL = "bulbul:v3"
+TTS_SPEAKER = "priya"
 STT_MODEL = "saaras:v3"
 STT_MODE = "transcribe"
 

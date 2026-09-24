@@ -25,7 +25,7 @@ memory.
 
 - `SARVAM_API_KEY`: Sarvam translates the English guidance into the merchant's language and voices it (the voice note
   becomes `audio_url`), and powers `/api/voice/*`. The Sarvam constants in `app/services/sarvam.py` were checked against
-  the sarvamai SDK 0.1.34 API definition: TTS sends `language_code` (`bulbul:v2`), STT uses `saaras:v3`, translate
+  the sarvamai SDK 0.1.34 API definition: TTS sends `language_code` (`bulbul:v3`, speaker `priya`; `bulbul:v2` is deprecated), STT uses `saaras:v3`, translate
   uses `mayura:v1`.
 - `WHATSAPP_MODE=twilio` + `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` (+ `TWILIO_WHATSAPP_FROM`, default the Twilio
   sandbox number) sends real WhatsApp messages. Twilio is used only when the mode is `twilio` and both credentials are
