@@ -2,9 +2,21 @@
 
     cd backend && python3 -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
     cp .env.example .env          # set VISION_PROVIDER=claude + ANTHROPIC_API_KEY for live AI
-    python -m app.seed            # --demo-location LAT,LNG puts Ramesh General Store at the venue
+    python -m app.seed            # --demo-location LAT,LNG puts every merchant at the venue (see below)
     uvicorn app.main:app --host 0.0.0.0 --port 8000
     pytest
+
+`/api/health` shows `"anthropic_key": true` once `ANTHROPIC_API_KEY` in `.env` has been picked up.
+
+## Demo-day settings (`backend/.env`)
+
+- `PUBLIC_BASE_URL=http://<LAN-IP>:8000` (e.g. `http://192.168.1.20:8000`, from `ip addr` / `ipconfig`). Photo and
+  audio URLs in API responses are absolute and built from this. The default `http://localhost:8000` breaks every
+  image on the phone or on any laptop other than the server.
+- `GPS_RADIUS_M=200` (recommended for the demo). Indoor GPS drifts by 50-150 m, and the default 100 m radius would turn
+  an honest visit into a GPS warning (−20) and push it towards manager review.
+- Seed with `python -m app.seed --demo-location LAT,LNG` using the venue's coordinates. Ramesh General Store is placed
+  exactly on that point and every other merchant within ~110 m of it (always under 150 m), so any merchant can be visited on stage.
 
 Demo: `scripts/demo_visit.sh demo_photos/counter_bad.jpg` → non-compliant → Hindi WhatsApp guidance.
 Offline safety net: VISION_PROVIDER=fixture + photos pinned via scripts/register_fixture.py; unset N8N_WEBHOOK_URL to run inline.

@@ -3,6 +3,14 @@
 Base URL: `http://<backend-host>:8000/api` · JSON · snake_case · datetimes are naive UTC ISO-8601 · photos served from `photo_url`.
 Interactive docs: `http://<backend-host>:8000/docs`.
 
+**`photo_url` / `audio_url` are absolute URLs built from the backend's `PUBLIC_BASE_URL`.** The default
+`http://localhost:8000` only works on the server machine itself. For a phone or another laptop, start the backend with
+`PUBLIC_BASE_URL=http://<LAN-IP>:8000` (for example `http://192.168.1.20:8000`) in `backend/.env`. `photo_url` is
+`null` for seeded historical visits (they have no photo); show a placeholder.
+
+**`/api/internal/*` is for the n8n workflow only.** It needs the `X-Internal-Token` header and runs individual pipeline
+steps. The frontend must never call it: use `POST /visits` and `POST /visits/{id}/analyze` instead.
+
 All example responses below were captured with `curl` against a freshly seeded local server (`python -m app.seed`, `VISION_PROVIDER=fixture`). Long arrays are trimmed to 1-2 representative items; timestamps are real values from that run.
 
 ## Core demo loop
@@ -10,18 +18,50 @@ All example responses below were captured with `curl` against a freshly seeded l
 1. `POST /visits` (multipart/form-data)
    fields: `merchant_id` (int), `fse_id` (int), `lat`, `lng` (float, device GPS), `captured_at` (ISO, device clock),
    `capture_source` (`"camera"` | `"gallery"`), `analyze` (`"true"` to start analysis immediately), `photo` (jpeg/png/webp ≤ 10 MB)
-   → 201 `VisitOut` (status `"submitted"`, or `"analyzing"`/`"completed"` if `analyze=true`)
-   errors: 404 unknown merchant/fse · 413 too large · 415 wrong type · 422 unreadable image
-2. `POST /visits/{id}/analyze` → `VisitOut` · 409 if already analyzed
+   → 201 `VisitOut`. Without `analyze` the status is `"submitted"`. With `analyze=true` it can be:
+   `"analyzing"` (n8n mode, poll it), or the final `"completed"`, `"escalated"`, `"blocked"` or `"failed"` (inline mode).
+   errors: 404 unknown merchant/fse · 413 larger than 10 MB · 415 an image, but not JPEG/PNG/WebP · 422 not a readable image
+   (the format is detected from the file bytes; the multipart `Content-Type` of the photo is ignored)
+2. `POST /visits/{id}/analyze` → `VisitOut` · **409 if the status is not `submitted` or `failed`, or is a fresh `analyzing`**.
+   A `failed` visit can be re-analyzed. So can a visit stuck in `analyzing` with no pipeline progress for over 120 s
+   (for example n8n crashed mid-run): that recovery run always goes inline and is marked `pipeline_mode: "inline_recovery"`.
+   Two taps on "Analyze" are safe: the backend claims the visit atomically, so the second call gets 409 and the pipeline runs once.
 3. `GET /visits/{id}` → `VisitOut`. **Poll every 1s while status == "analyzing"** (n8n mode).
    Animate `pipeline_log[]` entries (`step`, `at`, `summary`) as the live journey:
    `queued → fraud_check → vision_ai → merchant_context → decision → incentive | guidance → whatsapp | escalation | block → complete`
 
+Statuses: `submitted` (uploaded, not analyzed) · `analyzing` · `completed` (compliant or non-compliant, actions done) ·
+`escalated` (low confidence, waiting for a manager) · `blocked` (failed authenticity, e.g. a reused photo) ·
+`rejected` (a manager rejected the escalation; final) · `failed` (the pipeline crashed; the `error` step in
+`pipeline_log` says why; retry with `POST /visits/{id}/analyze`).
+
+### What the frontend must send (and why)
+
+- **`capture_source=camera` for every in-app capture**, `gallery` only when the user picked an existing file.
+- **`captured_at` = the device clock at the moment of capture** (ISO-8601 with timezone, e.g. `2026-09-24T20:18:20Z`).
+  If you do not have one, **omit the field**. Never send an empty `captured_at=`: it is not part of the contract (today it
+  is silently read as "no capture time", costing 10 points; stricter parsing would reject it with 422).
+
+The authenticity score starts at 100 and each evidence signal subtracts a penalty. `VERIFIED` needs ≥ 70;
+30-69 is `REVIEW_REQUIRED` (the visit is escalated to a manager); < 30 or a reused photo is `BLOCKED`.
+Browser camera captures usually carry no EXIF, which always costs 10, so a perfect in-app visit scores **90**.
+
+| Signal | Pass | Penalty otherwise |
+| --- | --- | --- |
+| `live_capture` | `camera`: 0 | `gallery`: 25 · missing/unknown: 10 |
+| `timestamp` | `captured_at` within 10 min of upload: 0 | missing: 10 · 10-60 min: 15 · over 60 min: 30 |
+| `exif` | consistent EXIF: 0 | no EXIF: 10 |
+| `gps` | within `GPS_RADIUS_M` of the shop: 0 | up to 3× radius: 20 · further: 45 |
+| `duplicate_image` | unique: 0 | reused photo: always `BLOCKED` |
+
+So: camera + `captured_at` = 90. Forgetting both costs another 20 (70, one GPS wobble away from review).
+A gallery pick is 100 − 10 − 25 = 65, which is `REVIEW_REQUIRED` even at the shop.
+
 ### VisitOut
 
 `id, merchant_id, merchant_name, fse_id, fse_name, status (submitted|analyzing|completed|escalated|blocked|rejected|failed),
-decision (compliant|non_compliant|low_confidence|fraud|null), decision_reasons[], photo_url, lat, lng, captured_at,
-received_at, capture_source, pipeline_mode (n8n|inline|inline_fallback), pipeline_log[], completed_at,
+decision (compliant|non_compliant|low_confidence|fraud|null), decision_reasons[], photo_url (null for seeded visits), lat, lng, captured_at,
+received_at, capture_source, pipeline_mode (n8n|inline|inline_fallback|inline_recovery), pipeline_log[], completed_at,
 authenticity {score 0-100, verdict VERIFIED|REVIEW_REQUIRED|BLOCKED, signals[{signal, status pass|warn|fail, penalty, detail}]},
 audit {paytm_qr_visible, qr_visibility_score, soundbox_visible, competitor, competitor_dominance, qr_obstructed,
        image_quality ok|blurry|dark, blur_score, suspicious_signals[], recommended_action, confidence, notes, provider},
@@ -171,7 +211,7 @@ Same photo submitted again as a fresh visit (fraud, duplicate image) yields `sta
 
 - `GET /merchants` → `[{id, name, owner_name, language, lat, lng, category, assigned_fse_name, latest_score, latest_decision, last_visit_at}]`
 - `GET /merchants/{id}` → `{merchant, context (memory: previous_scores, previous_issues, previous_interventions, consecutive_non_compliant, summary), recent_visits[], interventions[], open_escalations[]}`
-- `GET /merchants/{id}/impact` (P2) → observed transaction change around the latest intervention
+- `GET /merchants/{id}/impact` → **coming in P2 (404 today)**: observed transaction change around the latest intervention
 
 #### Example: `GET /merchants/1`
 
@@ -207,6 +247,15 @@ Same photo submitted again as a fresh visit (fraud, duplicate image) yields `sta
 - `GET /dashboard` → `{kpis{visits_today, visits_7d, compliance_rate_7d, avg_qr_score_7d, avg_authenticity_7d, blocked_7d, open_escalations, incentives_inr_7d, whatsapp_sent_7d}, decision_breakdown_7d, recent_visits[], fse_leaderboard[]}`
 - `GET /escalations?status=open` → `[{id, visit_id, merchant_name, fse_name, reason, status, photo_url, authenticity_score, qr_visibility_score, confidence, ...}]`
 - `POST /escalations/{id}/approve` · `POST /escalations/{id}/reject` body `{resolved_by, note?}` → escalation · 409 if already resolved
+
+Approval semantics:
+- **Reject** → the visit becomes `rejected` (final, `completed_at` set). No incentive, no guidance.
+- **Approve an unusable-photo escalation** (the audit's `recommended_action` is `retake_photo`: blurry, dark, or vision
+  unavailable) → the visit becomes `completed` but its **`decision` stays `low_confidence`**. There is nothing to judge, so no
+  automated action runs. Show it as "approved, no action".
+- **Approve any other escalation** (authenticity review, suspicious image, low vision confidence) → the manager overrides the
+  review gate and the real decision is applied: `decision` becomes `compliant` (incentive granted) or `non_compliant`
+  (guidance + WhatsApp sent), `decision_reasons[0]` is `"Manager approved (<name>)"`, and the status is `completed`.
 
 #### Example: `GET /dashboard`
 
@@ -267,6 +316,6 @@ Same photo submitted again as a fresh visit (fraud, duplicate image) yields `sta
 ## Supporting
 
 - `GET /visits?fse_id=&merchant_id=&limit=` · `GET /fraud/flagged` · `GET /fraud/{visit_id}` · `GET /audit/{visit_id}`
-- `POST /audit/analyze-image` (multipart photo) → `{quality, audit, provider}` (stateless try-it)
+- `POST /audit/analyze-image` (multipart photo) → `{quality, audit, provider}` (stateless try-it; same 413/415/422 rules as `POST /visits`)
 - `GET /incentives?fse_id=` → `{total_inr, items[]}` · `GET /transactions?merchant_id=&days=30`
-- `GET /health` → which providers are live (vision, n8n, memory, whatsapp)
+- `GET /health` → which providers are live (`vision_provider`, `anthropic_key` (a key is configured), `n8n`, `memory`, `whatsapp`)
