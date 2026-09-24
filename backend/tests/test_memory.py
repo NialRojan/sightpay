@@ -75,3 +75,33 @@ def test_fraud_visits_are_not_recorded_in_memory(db, monkeypatch):
     run_inline(db, make_visit(db, world, photo).id)
     assert run_inline(db, make_visit(db, world, photo).id).decision == "fraud"
     assert recorded == ["non_compliant"]
+
+
+def test_context_includes_observed_transaction_change(db):
+    seed(db, today=date(2026, 9, 25))
+    ramesh = db.scalar(select(models.Merchant).where(models.Merchant.name == "Ramesh General Store"))
+    ctx = get_memory().get_context(db, ramesh.id)
+    assert 12 < ctx.transaction_trend_pct < 24
+    assert "observed transaction change +" in ctx.summary
+
+
+def test_trend_skips_the_intervention_of_the_visit_being_analyzed(db):
+    """A visit's own guidance (e.g. on a re-run) has no post window yet; it must not hide the previous observed change."""
+    from datetime import datetime
+
+    seed(db, today=date(2026, 9, 25))
+    ramesh = db.scalar(select(models.Merchant).where(models.Merchant.name == "Ramesh General Store"))
+    old = db.scalars(select(models.Visit).where(models.Visit.merchant_id == ramesh.id)).first()
+    now = datetime(2026, 9, 25, 10, 0)
+    visit = models.Visit(merchant_id=ramesh.id, fse_id=old.fse_id, lat=0.0, lng=0.0, client_captured_at=now,
+                         received_at=now, capture_source="camera", status="analyzing", pipeline_log=[])
+    db.add(visit)
+    db.flush()
+    db.add(models.Intervention(merchant_id=ramesh.id, visit_id=visit.id, action="clear_qr_obstruction", issue="QR obstruction",
+                               message_text_en="x", message_text="x", message_language="hi-IN", created_at=now))
+    db.commit()
+
+    during_run = get_memory().get_context(db, ramesh.id, exclude_visit_id=visit.id)
+    assert 12 < during_run.transaction_trend_pct < 24
+    # Without the exclusion the latest intervention is today's: no post data, so no trend (never extrapolated).
+    assert get_memory().get_context(db, ramesh.id).transaction_trend_pct is None

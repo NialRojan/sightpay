@@ -111,3 +111,24 @@ def test_missing_cognee_falls_back_and_only_logs(db, monkeypatch, caplog):
     assert any("Cognee add failed" in r.getMessage() and r.exc_info and issubclass(r.exc_info[0], ImportError)
                for r in caplog.records)
     assert isinstance(CogneeMemory().adapter, CogneeAdapter)
+
+
+def test_visit_document_includes_observed_transaction_trend(db):
+    m = _ramesh(db)
+    visits = db.scalars(select(models.Visit).where(models.Visit.merchant_id == m.id).order_by(models.Visit.received_at.desc())).all()
+    doc = visit_memory_document(visits[0])
+    assert "Transaction trend after intervention: +17.5% (observed, not causal)" in doc
+    # An intervention made today has no post-window data yet: no trend line, never extrapolated.
+    from datetime import datetime
+
+    now = datetime(2026, 9, 25, 10, 0)
+    fresh = models.Visit(merchant_id=m.id, fse_id=visits[0].fse_id, lat=0.0, lng=0.0, client_captured_at=now,
+                         received_at=now, capture_source="camera", status="completed", decision="non_compliant", pipeline_log=[])
+    db.add(fresh)
+    db.flush()
+    db.add(models.Intervention(merchant_id=m.id, visit_id=fresh.id, action="clear_qr_obstruction", issue="QR obstruction",
+                               message_text_en="x", message_text="x", message_language="hi-IN", created_at=now))
+    db.commit()
+    db.refresh(fresh)
+    assert "Intervention: clear_qr_obstruction" in visit_memory_document(fresh)
+    assert "Transaction trend" not in visit_memory_document(fresh)

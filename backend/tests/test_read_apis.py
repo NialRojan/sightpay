@@ -36,3 +36,14 @@ def test_transactions_incentives_fraud(client, db):
     inc = client.get("/api/incentives").json()
     assert inc["total_inr"] == sum(i["amount_inr"] for i in inc["items"])
     assert client.get("/api/fraud/flagged").status_code == 200
+
+
+def test_dashboard_reports_observed_change(db):
+    seed(db, today=date(2026, 9, 25))
+    d = build_dashboard(db, now=datetime(2026, 9, 25, 12, 0))
+    assert d["kpis"]["avg_observed_change_pct"] is not None
+
+
+def test_observed_change_kpi_is_null_when_nothing_is_measurable(db):
+    d = build_dashboard(db, now=datetime(2026, 9, 25, 12, 0))
+    assert d["kpis"]["avg_observed_change_pct"] is None

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.schemas import visit_summary
+from app.services.impact import portfolio_impact
 from app.timeutil import utcnow
 
 
@@ -38,6 +39,8 @@ def build_dashboard(db: Session, now: datetime | None = None) -> dict:
         ),
         "whatsapp_sent_7d": count(models.Notification, models.Notification.created_at >= week_ago),
     }
+    # Average observed change over merchants whose latest intervention is measurable; None when none is.
+    kpis["avg_observed_change_pct"] = portfolio_impact(db)["overall_avg_change_pct"]
 
     recent = db.scalars(select(models.Visit).order_by(models.Visit.received_at.desc()).limit(10)).all()
 

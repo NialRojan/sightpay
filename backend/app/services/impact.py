@@ -2,7 +2,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app import models
@@ -81,23 +81,35 @@ def _intervention_date(iv: models.Intervention) -> date:
     return iv.created_at.date()
 
 
-def load_rows(db: Session, merchant_id: int) -> list[tuple[date, float, int]]:
-    rows = db.scalars(
-        select(models.Transaction).where(models.Transaction.merchant_id == merchant_id).order_by(models.Transaction.txn_date)
-    ).all()
+def load_rows(db: Session, merchant_id: int, start: date | None = None, end: date | None = None) -> list[tuple[date, float, int]]:
+    q = select(models.Transaction).where(models.Transaction.merchant_id == merchant_id)
+    if start is not None:
+        q = q.where(models.Transaction.txn_date >= start)
+    if end is not None:
+        q = q.where(models.Transaction.txn_date <= end)
+    rows = db.scalars(q.order_by(models.Transaction.txn_date)).all()
     return [(r.txn_date, r.amount_inr, r.txn_count) for r in rows]
 
 
-def _latest_intervention(db: Session, merchant_id: int) -> models.Intervention | None:
-    return db.scalars(
-        select(models.Intervention).where(models.Intervention.merchant_id == merchant_id)
-        .order_by(models.Intervention.created_at.desc(), models.Intervention.id.desc()).limit(1)
-    ).first()
+def intervention_impact(db: Session, iv: models.Intervention, window_days: int = 14) -> ImpactResult:
+    """Observed change around one intervention, loading only the rows inside its baseline/post windows (one query)."""
+    d = _intervention_date(iv)
+    rows = load_rows(db, iv.merchant_id, d - timedelta(days=window_days), d + timedelta(days=window_days))
+    return compute_impact(rows, d, window_days=window_days)
 
 
-def latest_impact(db: Session, merchant_id: int) -> ImpactResult | None:
-    iv = _latest_intervention(db, merchant_id)
-    return compute_impact(load_rows(db, merchant_id), _intervention_date(iv)) if iv else None
+def _latest_intervention(db: Session, merchant_id: int, exclude_visit_id: int | None = None) -> models.Intervention | None:
+    q = select(models.Intervention).where(models.Intervention.merchant_id == merchant_id)
+    if exclude_visit_id is not None:
+        # visit_id is nullable: a plain != would also drop interventions that have no visit.
+        q = q.where(or_(models.Intervention.visit_id.is_(None), models.Intervention.visit_id != exclude_visit_id))
+    return db.scalars(q.order_by(models.Intervention.created_at.desc(), models.Intervention.id.desc()).limit(1)).first()
+
+
+def latest_impact(db: Session, merchant_id: int, exclude_visit_id: int | None = None) -> ImpactResult | None:
+    """Impact of the merchant's latest intervention, ignoring the one made by `exclude_visit_id` (the visit being analyzed)."""
+    iv = _latest_intervention(db, merchant_id, exclude_visit_id)
+    return intervention_impact(db, iv) if iv else None
 
 
 def merchant_impact(db: Session, merchant_id: int, intervention_id: int | None = None) -> dict | None:

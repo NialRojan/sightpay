@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
+from app.services.impact import intervention_impact
 from app.services.labels import ACTION_LABELS
 from app.services.memory.base import MerchantContext
 
@@ -40,7 +41,7 @@ class SqlMemory:
         interventions = db.scalars(
             select(models.Intervention)
             .where(models.Intervention.merchant_id == merchant_id)
-            .order_by(models.Intervention.created_at.desc())
+            .order_by(models.Intervention.created_at.desc(), models.Intervention.id.desc())
             .limit(5)
         ).all()
 
@@ -55,6 +56,14 @@ class SqlMemory:
             consecutive_non_compliant=streak,
             last_visit_at=visits[0].received_at if visits else None,
         )
+        # Observed change around the latest intervention, excluding the one the visit being analyzed made (on a
+        # re-run it already exists but has no post window yet). Visits have at most one intervention, so the
+        # latest other one is within these 5. Only an "ok" result is used: never extrapolated.
+        latest = next((i for i in interventions if exclude_visit_id is None or i.visit_id != exclude_visit_id), None)
+        if latest is not None:
+            impact = intervention_impact(db, latest)
+            if impact.status == "ok":
+                ctx.transaction_trend_pct = impact.change_pct
         ctx.summary = summarize(ctx)
         return ctx
 
