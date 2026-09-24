@@ -35,9 +35,9 @@ def create_app() -> FastAPI:
 
     Base.metadata.create_all(bind=engine)
 
-    from app.api import analytics, audit, escalations, fraud, incentives, internal, merchants, transactions, visits
+    from app.api import analytics, audit, escalations, fraud, fse, incentives, internal, merchants, transactions, visits
 
-    for r in (audit, visits, internal, merchants, escalations, analytics, fraud, incentives, transactions):
+    for r in (audit, visits, internal, merchants, escalations, analytics, fraud, incentives, transactions, fse):
         app.include_router(r.router, prefix="/api")
 
     return app
