@@ -28,6 +28,12 @@ def create_app() -> FastAPI:
 
     os.makedirs(settings.upload_dir, exist_ok=True)
     app.mount("/media", StaticFiles(directory=settings.upload_dir, check_dir=False), name="media")
+
+    from app import models  # noqa: F401
+    from app.db import Base, engine
+
+    Base.metadata.create_all(bind=engine)
+
     return app
 
 
