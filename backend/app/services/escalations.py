@@ -17,6 +17,7 @@ def resolve_escalation(db: Session, esc: models.Escalation, approve: bool, resol
 
     if not approve:
         visit.status = "rejected"
+        visit.completed_at = utcnow()
         append_step(visit, "manager_review", f"Rejected by {resolved_by}: {note or 'no note'}")
         db.commit()
         return esc

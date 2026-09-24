@@ -89,3 +89,28 @@ def test_n8n_retries_of_fraud_block_and_complete_are_idempotent(client, db):
     assert first_get["completed_at"] == second_get["completed_at"] is not None
     steps = [s["step"] for s in second_get["pipeline_log"]]
     assert steps == ["fraud_check", "vision_ai", "decision", "block", "complete"]
+
+
+def test_decide_does_not_overwrite_a_final_decision(client, db):
+    from app.services.pipeline import run_inline
+
+    world = make_world(db)
+    v = run_inline(db, make_visit(db, world, sharp_jpeg(65)).id)
+    assert (v.status, v.decision) == ("completed", "non_compliant")
+    v.decision, v.decision_reasons = "compliant", ["Manager approved (Priya)"]
+    db.commit()
+    assert client.post(f"/api/internal/visits/{v.id}/decide", headers=H).status_code == 409
+    db.refresh(v)
+    assert v.decision == "compliant"
+
+
+def test_decide_is_allowed_again_while_analyzing(client, db):
+    world = make_world(db)
+    v = make_visit(db, world, sharp_jpeg(66))
+    base = f"/api/internal/visits/{v.id}"
+    v.status = "analyzing"
+    db.commit()
+    client.post(f"{base}/fraud", headers=H)
+    client.post(f"{base}/vision", headers=H)
+    assert client.post(f"{base}/decide", headers=H).status_code == 200
+    assert client.post(f"{base}/decide", headers=H).status_code == 200  # n8n retry mid-run

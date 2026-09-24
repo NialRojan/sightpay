@@ -1,3 +1,5 @@
+import hmac
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
@@ -11,7 +13,7 @@ from app.services.pipeline import step_context, step_decide, step_fraud, step_vi
 
 
 def require_internal(x_internal_token: str | None = Header(default=None)) -> None:
-    if x_internal_token != settings.internal_token:
+    if not hmac.compare_digest((x_internal_token or "").encode(), settings.internal_token.encode()):
         raise HTTPException(401, "Invalid internal token")
 
 
@@ -50,6 +52,8 @@ def context(visit_id: int, db: Session = Depends(get_db)):
 def decide_visit(visit_id: int, db: Session = Depends(get_db)):
     visit = _visit(db, visit_id)
     _require(visit.authenticity_verdict is not None and visit.audit is not None, "Run fraud and vision first")
+    # A manual retry must not overwrite a decision that is final (e.g. a manager's override).
+    _require(visit.decision is None or visit.status == "analyzing", f"Visit already decided and {visit.status}")
     ctx = get_memory().get_context(db, visit.merchant_id, exclude_visit_id=visit.id)
     d = step_decide(db, visit, ctx)
     return {"visit_id": visit.id, "outcome": d.outcome, "reasons": d.reasons}

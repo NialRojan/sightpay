@@ -10,7 +10,8 @@ def test_list_and_reject(client, db):
     esc_id = rows[0]["id"]
     res = client.post(f"/api/escalations/{esc_id}/reject", json={"resolved_by": "Priya Kulkarni", "note": "Retake"})
     assert res.json()["status"] == "rejected"
-    assert client.get(f"/api/visits/{v.id}").json()["status"] == "rejected"
+    after = client.get(f"/api/visits/{v.id}").json()
+    assert after["status"] == "rejected" and after["completed_at"] is not None
     assert client.post(f"/api/escalations/{esc_id}/approve", json={"resolved_by": "Priya"}).status_code == 409
 
 
