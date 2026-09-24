@@ -84,4 +84,5 @@ def complete_visit(db: Session, visit: models.Visit) -> None:
     visit.completed_at = utcnow()
     append_step(visit, "complete", f"Visit {visit.status}")
     db.commit()
-    get_memory().record_visit_outcome(db, visit)
+    if visit.decision != "fraud":  # a blocked visit is not merchant history
+        get_memory().record_visit_outcome(db, visit)

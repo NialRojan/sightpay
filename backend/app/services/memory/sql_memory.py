@@ -6,21 +6,30 @@ from app.services.labels import ACTION_LABELS
 from app.services.memory.base import MerchantContext
 
 DONE_STATUSES = ("completed", "escalated", "blocked")
+HISTORY_DECISIONS = ("compliant", "non_compliant")
 
 
 class SqlMemory:
     def get_context(self, db: Session, merchant_id: int, exclude_visit_id: int | None = None) -> MerchantContext:
         merchant = db.get(models.Merchant, merchant_id)
+        # Only visits that produced a real verdict on a usable photo count as history. Blocked (fraud),
+        # escalated/low-confidence and unusable-photo visits are skipped entirely: they neither feed scores
+        # nor break or extend the non-compliant streak.
         q = (
             select(models.Visit)
-            .where(models.Visit.merchant_id == merchant_id, models.Visit.status.in_(DONE_STATUSES))
+            .join(models.VisitAudit, models.VisitAudit.visit_id == models.Visit.id)
+            .where(
+                models.Visit.merchant_id == merchant_id,
+                models.Visit.status.in_(DONE_STATUSES),
+                models.Visit.decision.in_(HISTORY_DECISIONS),
+                models.VisitAudit.image_quality == "ok",
+            )
             .order_by(models.Visit.received_at.desc())
             .limit(10)
         )
         if exclude_visit_id is not None:
             q = q.where(models.Visit.id != exclude_visit_id)
         visits = db.scalars(q).all()
-        audited = [v for v in visits if v.audit is not None]
 
         streak = 0
         for v in visits:
@@ -39,9 +48,9 @@ class SqlMemory:
             merchant_id=merchant_id,
             merchant_name=merchant.name,
             rep_name=merchant.fse.user.name if merchant.fse else None,
-            previous_scores=[v.audit.qr_visibility_score for v in audited],
+            previous_scores=[v.audit.qr_visibility_score for v in visits],
             previous_issues=[ACTION_LABELS.get(v.audit.recommended_action, v.audit.recommended_action)
-                             for v in audited if v.decision == "non_compliant"],
+                             for v in visits if v.decision == "non_compliant"],
             previous_interventions=[i.action for i in interventions],
             consecutive_non_compliant=streak,
             last_visit_at=visits[0].received_at if visits else None,
