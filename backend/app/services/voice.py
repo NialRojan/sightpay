@@ -78,7 +78,7 @@ def _todays_visits(db: Session, fse_id: int, lat: float | None, lng: float | Non
     top = priority_queue(db, fse_id, lat, lng)[:3]
     if not top:
         return "All your merchants are covered today."
-    lines = [f"{i}. {r['name']}, {r['reasons'][0].lower()}" for i, r in enumerate(top, 1)]
+    lines = [f"{i}. {r['name']}, {r['reasons'][0][:1].lower()}{r['reasons'][0][1:]}" for i, r in enumerate(top, 1)]
     return "Visit today: " + ". ".join(lines) + "."
 
 

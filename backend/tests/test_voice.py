@@ -99,3 +99,35 @@ def test_voice_endpoint_rejects_oversized_audio(client, db, monkeypatch):
     _, fid = _ids(db)
     res = client.post("/api/voice/query", data={"fse_id": fid}, files={"audio": ("q.wav", b"x" * 11, "audio/wav")})
     assert res.status_code == 413
+
+
+def test_todays_visits_keeps_reason_casing_after_first_letter(db):
+    seed(db, today=date(2026, 9, 25))
+    _, fid = _ids(db)
+    a = answer_query(db, fid, "Aaj mujhe kaunse merchants visit karne hain?")
+    assert "Om Sweets, last QR score 33" in a.answer_en and "qr score" not in a.answer_en
+
+
+def test_voice_endpoint_rejects_whitespace_only_text(client, db):
+    seed(db, today=date(2026, 9, 25))
+    _, fid = _ids(db)
+    assert client.post("/api/voice/query", data={"fse_id": fid, "text": "   "}).status_code == 422
+
+
+def test_tts_rejects_empty_and_whitespace_text(client, monkeypatch):
+    monkeypatch.setattr(settings, "sarvam_api_key", "k")
+    for text in ("", "   "):
+        assert client.post("/api/voice/tts", json={"text": text}).status_code == 422
+
+
+@respx.mock
+def test_tts_storage_error_is_502(client, monkeypatch):
+    monkeypatch.setattr(settings, "sarvam_api_key", "k")
+    respx.post(f"{API}/text-to-speech").mock(
+        return_value=httpx.Response(200, json={"audios": [base64.b64encode(b"RIFF").decode()]}))
+
+    def disk_full(*a, **k):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr("app.api.voice.store_media", disk_full)
+    assert client.post("/api/voice/tts", json={"text": "नमस्ते"}).status_code == 502

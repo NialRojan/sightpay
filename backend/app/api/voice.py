@@ -1,5 +1,7 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 from sqlalchemy.orm import Session
 
 from app.api.fse import _fse
@@ -25,7 +27,7 @@ def voice_query(
     audio: UploadFile | None = File(None),
     db: Session = Depends(get_db),
 ):
-    if audio is None and not text:
+    if audio is None and not (text and text.strip()):
         raise HTTPException(422, "Send either an audio file or text")
     _fse(db, fse_id)
     if audio is not None:
@@ -46,7 +48,7 @@ def voice_query(
 
 
 class TtsIn(BaseModel):
-    text: str
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]  # empty/whitespace-only -> 422
     language: str = "hi-IN"
 
 
@@ -59,4 +61,6 @@ def tts(body: TtsIn):
         path = store_media(client.tts(body.text, body.language), "tts", ".wav")
     except SarvamError as exc:
         raise HTTPException(502, str(exc))
+    except OSError as exc:
+        raise HTTPException(502, f"Could not store the audio: {exc}")
     return {"audio_url": f"{settings.public_base_url}/media/{path}"}
