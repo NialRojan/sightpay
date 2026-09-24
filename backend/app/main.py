@@ -34,9 +34,10 @@ def create_app() -> FastAPI:
 
     Base.metadata.create_all(bind=engine)
 
-    from app.api import audit, visits
+    from app.api import audit, internal, visits
 
     app.include_router(audit.router, prefix="/api")
+    app.include_router(internal.router, prefix="/api")
     app.include_router(visits.router, prefix="/api")
 
     return app

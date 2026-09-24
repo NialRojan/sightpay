@@ -1,8 +1,12 @@
 import logging
 
+import httpx
+from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app import models
+from app.config import settings
+from app.db import SessionLocal
 from app.services import actions
 from app.services.decision import AuditFacts, Decision, decide
 from app.services.fraud.engine import run_fraud_checks
@@ -79,3 +83,34 @@ def run_inline(db: Session, visit_id: int) -> models.Visit:
         raise
     db.expire(visit)
     return visit
+
+
+def start_analysis(db: Session, visit: models.Visit, background: BackgroundTasks) -> str:
+    if settings.n8n_webhook_url:
+        visit.status = "analyzing"
+        visit.pipeline_mode = "n8n"
+        append_step(visit, "queued", "Sent to n8n workflow")
+        db.commit()
+        background.add_task(_post_to_n8n, visit.id, visit.merchant_id)
+        return "n8n"
+    run_inline(db, visit.id)
+    return "inline"
+
+
+def _post_to_n8n(visit_id: int, merchant_id: int) -> None:
+    try:
+        res = httpx.post(settings.n8n_webhook_url, json={"visit_id": visit_id, "merchant_id": merchant_id}, timeout=5.0)
+        res.raise_for_status()
+    except httpx.HTTPError as exc:
+        log.warning("n8n unreachable (%s); running pipeline inline for visit %s", exc, visit_id)
+        db = SessionLocal()
+        try:
+            visit = db.get(models.Visit, visit_id)
+            visit.pipeline_mode = "inline_fallback"
+            append_step(visit, "n8n_unreachable", str(exc))
+            db.commit()
+            run_inline(db, visit_id)
+        except Exception:
+            log.exception("inline fallback failed for visit %s", visit_id)
+        finally:
+            db.close()
