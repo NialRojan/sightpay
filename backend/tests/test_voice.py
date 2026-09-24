@@ -51,7 +51,8 @@ def test_todays_visits_lists_top_three(db):
     seed(db, today=date(2026, 9, 25))
     _, fid = _ids(db)
     a = answer_query(db, fid, "Aaj mujhe kaunse merchants visit karne hain?")
-    assert a.answer_en.startswith("Visit today:") and a.answer_en.count(". ") >= 3
+    assert a.answer_en.startswith("Please visit these merchants today.") and a.answer_en.count(". ") >= 3
+    assert "First, " in a.answer_en and "Third, " in a.answer_en
 
 
 @respx.mock
@@ -105,7 +106,7 @@ def test_todays_visits_keeps_reason_casing_after_first_letter(db):
     seed(db, today=date(2026, 9, 25))
     _, fid = _ids(db)
     a = answer_query(db, fid, "Aaj mujhe kaunse merchants visit karne hain?")
-    assert "Om Sweets, last QR score 33" in a.answer_en and "qr score" not in a.answer_en
+    assert "Om Sweets: last QR score 33" in a.answer_en and "qr score" not in a.answer_en
 
 
 def test_voice_endpoint_rejects_whitespace_only_text(client, db):
