@@ -1,0 +1,272 @@
+# SightPay API Contract (v1)
+
+Base URL: `http://<backend-host>:8000/api` · JSON · snake_case · datetimes are naive UTC ISO-8601 · photos served from `photo_url`.
+Interactive docs: `http://<backend-host>:8000/docs`.
+
+All example responses below were captured with `curl` against a freshly seeded local server (`python -m app.seed`, `VISION_PROVIDER=fixture`). Long arrays are trimmed to 1-2 representative items; timestamps are real values from that run.
+
+## Core demo loop
+
+1. `POST /visits` (multipart/form-data)
+   fields: `merchant_id` (int), `fse_id` (int), `lat`, `lng` (float, device GPS), `captured_at` (ISO, device clock),
+   `capture_source` (`"camera"` | `"gallery"`), `analyze` (`"true"` to start analysis immediately), `photo` (jpeg/png/webp ≤ 10 MB)
+   → 201 `VisitOut` (status `"submitted"`, or `"analyzing"`/`"completed"` if `analyze=true`)
+   errors: 404 unknown merchant/fse · 413 too large · 415 wrong type · 422 unreadable image
+2. `POST /visits/{id}/analyze` → `VisitOut` · 409 if already analyzed
+3. `GET /visits/{id}` → `VisitOut`. **Poll every 1s while status == "analyzing"** (n8n mode).
+   Animate `pipeline_log[]` entries (`step`, `at`, `summary`) as the live journey:
+   `queued → fraud_check → vision_ai → merchant_context → decision → incentive | guidance → whatsapp | escalation | block → complete`
+
+### VisitOut
+
+`id, merchant_id, merchant_name, fse_id, fse_name, status (submitted|analyzing|completed|escalated|blocked|rejected|failed),
+decision (compliant|non_compliant|low_confidence|fraud|null), decision_reasons[], photo_url, lat, lng, captured_at,
+received_at, capture_source, pipeline_mode (n8n|inline|inline_fallback), pipeline_log[], completed_at,
+authenticity {score 0-100, verdict VERIFIED|REVIEW_REQUIRED|BLOCKED, signals[{signal, status pass|warn|fail, penalty, detail}]},
+audit {paytm_qr_visible, qr_visibility_score, soundbox_visible, competitor, competitor_dominance, qr_obstructed,
+       image_quality ok|blurry|dark, blur_score, suspicious_signals[], recommended_action, confidence, notes, provider},
+actions {incentive, intervention {message_text, message_text_en, message_language, audio_url}, escalation, notifications[]}`
+
+UI copy rule: authenticity is "combined evidence signals", never "EXIF-verified".
+
+#### Example: `POST /visits` with `analyze=true` (compliant → incentive)
+
+```bash
+curl -F merchant_id=1 -F fse_id=1 -F lat=18.510189 -F lng=73.7982 -F capture_source=camera \
+     -F captured_at=2026-09-24T20:18:20Z -F analyze=true \
+     -F "photo=@demo_photos/counter_good.jpg;type=image/jpeg" http://localhost:8000/api/visits
+```
+
+```json
+{
+  "id": 50,
+  "merchant_id": 1,
+  "merchant_name": "Ramesh General Store",
+  "fse_id": 1,
+  "fse_name": "Amit Patil",
+  "status": "completed",
+  "decision": "compliant",
+  "decision_reasons": [
+    "Paytm QR clearly visible and Soundbox present",
+    "Improved from previous score 42 to 89"
+  ],
+  "photo_url": "http://localhost:8000/media/visit_ac1714e408ec4414a560843d4d2c4b0d.jpg",
+  "lat": 18.510189,
+  "lng": 73.7982,
+  "captured_at": "2026-09-24T20:18:21",
+  "received_at": "2026-09-24T20:18:21.048841",
+  "capture_source": "camera",
+  "pipeline_mode": "inline",
+  "pipeline_log": [
+    {"step": "fraud_check", "at": "2026-09-24T20:18:21.053836", "summary": "Authenticity 90/100 VERIFIED"},
+    {"step": "vision_ai", "at": "2026-09-24T20:18:21.061869", "summary": "QR visibility 89, confidence 0.93 (fixture)"},
+    {"step": "merchant_context", "at": "2026-09-24T20:18:21.063852", "summary": "Ramesh General Store: last score 42 (2026-09-05); previous issue: QR obstruction; previous intervention: clear_qr_obstruction; 2 non-compliant visit(s) in a row.", "data": {"source": "sql"}},
+    {"step": "decision", "at": "2026-09-24T20:18:21.064354", "summary": "compliant: Paytm QR clearly visible and Soundbox present; Improved from previous score 42 to 89"},
+    {"step": "incentive", "at": "2026-09-24T20:18:21.065540", "summary": "₹50 incentive approved for Amit Patil"},
+    {"step": "complete", "at": "2026-09-24T20:18:21.066374", "summary": "Visit completed"}
+  ],
+  "completed_at": "2026-09-24T20:18:21.066369",
+  "authenticity": {
+    "score": 90,
+    "verdict": "VERIFIED",
+    "signals": [
+      {"signal": "gps", "status": "pass", "penalty": 0, "detail": "0 m from merchant (limit 100 m)"},
+      {"signal": "duplicate_image", "status": "pass", "penalty": 0, "detail": "Unique among 0 previous photos"}
+    ]
+  },
+  "audit": {
+    "paytm_qr_visible": true,
+    "qr_visibility_score": 89,
+    "soundbox_visible": true,
+    "competitor": "PhonePe",
+    "competitor_dominance": "low",
+    "qr_obstructed": false,
+    "image_quality": "ok",
+    "blur_score": 9951.9,
+    "suspicious_signals": [],
+    "recommended_action": "none",
+    "confidence": 0.93,
+    "notes": "Paytm QR clearly visible beside the billing counter; Soundbox on.",
+    "provider": "fixture"
+  },
+  "actions": {
+    "incentive": {"id": 18, "fse_id": 1, "merchant_id": 1, "visit_id": 50, "amount_inr": 50, "status": "approved", "reason": "Verified compliant visit"},
+    "intervention": null,
+    "escalation": null,
+    "notifications": []
+  }
+}
+```
+
+Same photo submitted again as a fresh visit (fraud, duplicate image) yields `status: "blocked"`, `decision: "fraud"`, `authenticity.verdict: "BLOCKED"`, and a `duplicate_image` signal with `status: "fail"`. A blurry photo yields `status: "escalated"`, `decision: "low_confidence"` and populates `actions.escalation`.
+
+#### Example: `GET /visits/{id}` (non-compliant → guidance + WhatsApp)
+
+```json
+{
+  "id": 51,
+  "merchant_id": 1,
+  "merchant_name": "Ramesh General Store",
+  "fse_id": 1,
+  "fse_name": "Amit Patil",
+  "status": "completed",
+  "decision": "non_compliant",
+  "decision_reasons": ["QR visibility 38 below 70", "Paytm QR obstructed"],
+  "photo_url": "http://localhost:8000/media/visit_fcb86f82ede343169f5edbedf0886f70.jpg",
+  "lat": 18.510189,
+  "lng": 73.7982,
+  "captured_at": "2026-09-24T20:18:27",
+  "received_at": "2026-09-24T20:18:27.554022",
+  "capture_source": "camera",
+  "pipeline_mode": "inline",
+  "pipeline_log": [
+    {"step": "fraud_check", "at": "2026-09-24T20:18:27.556336", "summary": "Authenticity 90/100 VERIFIED"},
+    {"step": "vision_ai", "at": "2026-09-24T20:18:27.563200", "summary": "QR visibility 38, confidence 0.93 (fixture)"},
+    {"step": "decision", "at": "2026-09-24T20:18:27.565406", "summary": "non_compliant: QR visibility 38 below 70; Paytm QR obstructed"},
+    {"step": "guidance", "at": "2026-09-24T20:18:27.566261", "summary": "Guidance in hi-IN: QR poorly positioned", "data": {"text": "नमस्ते Ramesh जी, Paytm QR को बिलिंग काउंटर के पास रखिए ताकि ग्राहकों को साफ़ दिखे।"}},
+    {"step": "whatsapp", "at": "2026-09-24T20:18:27.609127", "summary": "WhatsApp dry_run to Ramesh Shinde"},
+    {"step": "complete", "at": "2026-09-24T20:18:27.610018", "summary": "Visit completed"}
+  ],
+  "completed_at": "2026-09-24T20:18:27.610014",
+  "authenticity": {
+    "score": 90,
+    "verdict": "VERIFIED",
+    "signals": [
+      {"signal": "gps", "status": "pass", "penalty": 0, "detail": "0 m from merchant (limit 100 m)"},
+      {"signal": "duplicate_image", "status": "pass", "penalty": 0, "detail": "Unique among 1 previous photos"}
+    ]
+  },
+  "audit": {
+    "paytm_qr_visible": true,
+    "qr_visibility_score": 38,
+    "soundbox_visible": true,
+    "competitor": "PhonePe",
+    "competitor_dominance": "high",
+    "qr_obstructed": true,
+    "image_quality": "ok",
+    "blur_score": 10057.5,
+    "suspicious_signals": [],
+    "recommended_action": "reposition_paytm_qr",
+    "confidence": 0.93,
+    "notes": "PhonePe standee dominates the counter; Paytm QR is partly behind the register.",
+    "provider": "fixture"
+  },
+  "actions": {
+    "incentive": null,
+    "intervention": {
+      "id": 32, "merchant_id": 1, "visit_id": 51, "action": "reposition_paytm_qr", "issue": "QR poorly positioned",
+      "message_text_en": "Namaste Ramesh ji, please place the Paytm QR next to the billing counter so customers can see it clearly.",
+      "message_text": "नमस्ते Ramesh जी, Paytm QR को बिलिंग काउंटर के पास रखिए ताकि ग्राहकों को साफ़ दिखे।",
+      "message_language": "hi-IN", "audio_url": null
+    },
+    "escalation": null,
+    "notifications": [
+      {"id": 1, "channel": "whatsapp", "to_phone": "+919810000000", "body": "नमस्ते Ramesh जी, Paytm QR को बिलिंग काउंटर के पास रखिए ताकि ग्राहकों को साफ़ दिखे।", "audio_url": null, "status": "dry_run", "provider_ref": null, "error": null}
+    ]
+  }
+}
+```
+
+## Merchants
+
+- `GET /merchants` → `[{id, name, owner_name, language, lat, lng, category, assigned_fse_name, latest_score, latest_decision, last_visit_at}]`
+- `GET /merchants/{id}` → `{merchant, context (memory: previous_scores, previous_issues, previous_interventions, consecutive_non_compliant, summary), recent_visits[], interventions[], open_escalations[]}`
+- `GET /merchants/{id}/impact` (P2) → observed transaction change around the latest intervention
+
+#### Example: `GET /merchants/1`
+
+```json
+{
+  "merchant": {
+    "id": 1, "name": "Ramesh General Store", "owner_name": "Ramesh Shinde", "phone": "+919810000000",
+    "language": "hi-IN", "lat": 18.510189, "lng": 73.7982, "address": "Kothrud, Pune", "category": "kirana",
+    "assigned_fse_id": 1, "assigned_fse_name": "Amit Patil", "latest_score": 42, "latest_decision": "non_compliant",
+    "last_visit_at": "2026-09-05T05:00:00"
+  },
+  "context": {
+    "merchant_id": 1, "merchant_name": "Ramesh General Store", "rep_name": "Amit Patil",
+    "previous_scores": [42, 38], "previous_issues": ["QR obstruction", "QR poorly positioned"],
+    "previous_interventions": ["clear_qr_obstruction", "reposition_paytm_qr"], "consecutive_non_compliant": 2,
+    "last_visit_at": "2026-09-05T05:00:00", "transaction_trend_pct": null,
+    "summary": "Ramesh General Store: last score 42 (2026-09-05); previous issue: QR obstruction; previous intervention: clear_qr_obstruction; 2 non-compliant visit(s) in a row.",
+    "source": "sql", "extra": {}
+  },
+  "recent_visits": [
+    {"id": 2, "merchant_id": 1, "merchant_name": "Ramesh General Store", "fse_id": 1, "fse_name": "Amit Patil", "status": "completed", "decision": "non_compliant", "qr_visibility_score": 42, "authenticity_score": 92, "lat": 18.510189, "lng": 73.7982, "received_at": "2026-09-05T05:00:00"},
+    {"id": 1, "merchant_id": 1, "merchant_name": "Ramesh General Store", "fse_id": 1, "fse_name": "Amit Patil", "status": "completed", "decision": "non_compliant", "qr_visibility_score": 38, "authenticity_score": 96, "lat": 18.510189, "lng": 73.7982, "received_at": "2026-08-11T05:00:00"}
+  ],
+  "interventions": [
+    {"id": 2, "merchant_id": 1, "visit_id": 2, "action": "clear_qr_obstruction", "issue": "QR obstruction", "message_text_en": "Guidance sent: QR obstruction", "message_text": "Guidance sent: QR obstruction", "message_language": "hi-IN", "audio_url": null, "created_at": "2026-09-05T05:00:00"}
+  ],
+  "open_escalations": []
+}
+```
+
+## Manager
+
+- `GET /dashboard` → `{kpis{visits_today, visits_7d, compliance_rate_7d, avg_qr_score_7d, avg_authenticity_7d, blocked_7d, open_escalations, incentives_inr_7d, whatsapp_sent_7d}, decision_breakdown_7d, recent_visits[], fse_leaderboard[]}`
+- `GET /escalations?status=open` → `[{id, visit_id, merchant_name, fse_name, reason, status, photo_url, authenticity_score, qr_visibility_score, confidence, ...}]`
+- `POST /escalations/{id}/approve` · `POST /escalations/{id}/reject` body `{resolved_by, note?}` → escalation · 409 if already resolved
+
+#### Example: `GET /dashboard`
+
+```json
+{
+  "generated_at": "2026-09-24T20:18:44.033137",
+  "kpis": {
+    "visits_today": 5, "visits_7d": 5, "compliance_rate_7d": 50.0, "avg_qr_score_7d": 44.0,
+    "avg_authenticity_7d": 77.8, "blocked_7d": 1, "open_escalations": 2, "incentives_inr_7d": 50, "whatsapp_sent_7d": 1
+  },
+  "decision_breakdown_7d": {"low_confidence": 2, "compliant": 1, "non_compliant": 1, "fraud": 1},
+  "recent_visits": [
+    {"id": 53, "merchant_id": 1, "merchant_name": "Ramesh General Store", "fse_id": 1, "fse_name": "Amit Patil", "status": "escalated", "decision": "low_confidence", "qr_visibility_score": 0, "authenticity_score": 90, "lat": 18.510189, "lng": 73.7982, "received_at": "2026-09-24T20:18:39.441632"},
+    {"id": 52, "merchant_id": 1, "merchant_name": "Ramesh General Store", "fse_id": 1, "fse_name": "Amit Patil", "status": "blocked", "decision": "fraud", "qr_visibility_score": 38, "authenticity_score": 30, "lat": 18.510189, "lng": 73.7982, "received_at": "2026-09-24T20:18:34.018532"}
+  ],
+  "fse_leaderboard": [
+    {"fse_id": 1, "name": "Amit Patil", "territory": "Kothrud", "visits_7d": 4, "compliant_7d": 1, "verified_pct_7d": 75.0, "incentives_inr_7d": 50},
+    {"fse_id": 2, "name": "Sneha Joshi", "territory": "Shivajinagar", "visits_7d": 1, "compliant_7d": 0, "verified_pct_7d": 100.0, "incentives_inr_7d": 0},
+    {"fse_id": 3, "name": "Rahul Verma", "territory": "Hadapsar", "visits_7d": 0, "compliant_7d": 0, "verified_pct_7d": null, "incentives_inr_7d": 0}
+  ]
+}
+```
+
+`GET /analytics/dashboard` is an alias for `GET /dashboard` (same payload).
+
+#### Example: `GET /escalations?status=open`
+
+```json
+[
+  {
+    "id": 2, "visit_id": 53, "merchant_id": 1, "reason": "Photo is blurry", "status": "open", "note": null,
+    "resolved_by": null, "resolved_at": null, "created_at": "2026-09-24T20:18:39.451351",
+    "merchant_name": "Ramesh General Store", "fse_name": "Amit Patil",
+    "photo_url": "http://localhost:8000/media/visit_bc0512bc2cb243cc8ad607ee673d0f41.jpg",
+    "authenticity_score": 90, "qr_visibility_score": 0, "confidence": 0.0
+  },
+  {
+    "id": 1, "visit_id": 49, "merchant_id": 5, "reason": "Vision confidence 0.41 below 0.6", "status": "open", "note": null,
+    "resolved_by": null, "resolved_at": null, "created_at": "2026-09-24T20:17:48.159523",
+    "merchant_name": "Sai Dairy", "fse_name": "Sneha Joshi", "photo_url": null,
+    "authenticity_score": 89, "qr_visibility_score": 55, "confidence": 0.41
+  }
+]
+```
+
+#### Example: `POST /escalations/2/approve` body `{"resolved_by": "Priya Manager"}`
+
+```json
+{
+  "id": 2, "visit_id": 53, "merchant_id": 1, "reason": "Photo is blurry", "status": "approved", "note": null,
+  "resolved_by": "Priya Manager", "resolved_at": "2026-09-24T20:18:48.749963", "created_at": "2026-09-24T20:18:39.451351",
+  "merchant_name": "Ramesh General Store", "fse_name": "Amit Patil",
+  "photo_url": "http://localhost:8000/media/visit_bc0512bc2cb243cc8ad607ee673d0f41.jpg",
+  "authenticity_score": 90, "qr_visibility_score": 0, "confidence": 0.0
+}
+```
+
+## Supporting
+
+- `GET /visits?fse_id=&merchant_id=&limit=` · `GET /fraud/flagged` · `GET /fraud/{visit_id}` · `GET /audit/{visit_id}`
+- `POST /audit/analyze-image` (multipart photo) → `{quality, audit, provider}` (stateless try-it)
+- `GET /incentives?fse_id=` → `{total_inr, items[]}` · `GET /transactions?merchant_id=&days=30`
+- `GET /health` → which providers are live (vision, n8n, memory, whatsapp)

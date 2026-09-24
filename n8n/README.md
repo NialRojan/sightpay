@@ -7,3 +7,10 @@
 
 If n8n is down, the backend falls back to running the same steps inline (`pipeline_mode = inline_fallback`).
 Each node calls one idempotent `/api/internal/...` step, so "Retry" on a failed execution is safe.
+
+**Fresh checkout gotcha:** Docker may create `n8n/data` as root-owned on first `docker compose up`, which then crashes
+n8n with `EACCES` errors. Fix an already-created root-owned directory with:
+
+    docker run --rm -v "$(pwd)/data:/data" alpine chown -R 1000:1000 /data
+
+or avoid it entirely by running `mkdir data` before the first `docker compose up`.

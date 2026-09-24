@@ -4,6 +4,7 @@ __pycache__/
 backend/.env
 backend/sightpay.db
 backend/storage/
+backend/demo_photos/
 n8n/data/
 .pytest_cache/
 .superpowers/
