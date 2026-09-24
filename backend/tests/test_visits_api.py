@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from tests.factories import make_world, sharp_jpeg
+from tests.factories import image_bytes, make_world, sharp_jpeg
 
 
 def _form(world, **kw):
@@ -44,7 +44,11 @@ def test_validation(client, db):
     world = make_world(db)
     photo = {"photo": ("c.jpg", sharp_jpeg(52), "image/jpeg")}
     assert client.post("/api/visits", data=_form(world, merchant_id=999), files=photo).status_code == 404
-    assert client.post("/api/visits", data=_form(world), files={"photo": ("c.txt", b"x", "text/plain")}).status_code == 415
+    assert client.post("/api/visits", data=_form(world), files={"photo": ("c.txt", b"x", "text/plain")}).status_code == 422
+    gif = {"photo": ("c.gif", image_bytes("GIF"), "image/jpeg")}  # header lies; the bytes decide
+    assert client.post("/api/visits", data=_form(world), files=gif).status_code == 415
+    big = {"photo": ("c.jpg", b"\xff" * (10 * 1024 * 1024 + 1), "image/jpeg")}
+    assert client.post("/api/visits", data=_form(world), files=big).status_code == 413
     assert client.post("/api/visits", data=_form(world), files={"photo": ("c.jpg", b"notanimage", "image/jpeg")}).status_code == 422
     assert client.get("/api/visits/12345").status_code == 404
 
@@ -54,3 +58,13 @@ def test_list_visits(client, db):
     client.post("/api/visits", data=_form(world, analyze="true"), files={"photo": ("c.jpg", sharp_jpeg(53), "image/jpeg")})
     rows = client.get(f"/api/visits?fse_id={world.fse.id}").json()
     assert len(rows) == 1 and rows[0]["qr_visibility_score"] == 38
+
+
+def test_media_type_comes_from_the_image_not_the_header(client, db):
+    world = make_world(db)
+    png = {"photo": ("c.jpg", image_bytes("PNG"), "application/octet-stream")}
+    res = client.post("/api/visits", data=_form(world), files=png)
+    assert res.status_code == 201
+    assert res.json()["photo_url"].endswith(".png")
+    from app import models
+    assert db.get(models.Visit, res.json()["id"]).photo_media_type == "image/png"

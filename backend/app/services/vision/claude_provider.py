@@ -1,7 +1,9 @@
 import base64
+import io
 
 import anthropic
 import pydantic
+from PIL import Image, ImageOps
 
 from app.config import settings
 from app.services.vision.schema import CounterAudit, VisionUnavailable
@@ -25,6 +27,18 @@ not_a_shop_counter. Use an empty list if none apply.
 # Worst case timeout x (retries + 1) = 80 s must stay under the n8n Vision node timeout (90 s).
 CLIENT_TIMEOUT_S = 40.0
 CLIENT_MAX_RETRIES = 1
+MAX_LONG_EDGE_PX = 1568
+JPEG_QUALITY = 85
+
+
+def prepare_image(image_bytes: bytes) -> bytes:
+    """Re-encode any phone photo as an upright RGB JPEG with long edge <= 1568 px (size/format-safe for the API)."""
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        img.thumbnail((MAX_LONG_EDGE_PX, MAX_LONG_EDGE_PX))
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=JPEG_QUALITY)
+    return buf.getvalue()
 
 
 class ClaudeVisionProvider:
@@ -38,7 +52,10 @@ class ClaudeVisionProvider:
         self._model = model or settings.anthropic_model
 
     def analyze(self, image_bytes: bytes, media_type: str) -> CounterAudit:
-        image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
+        try:
+            image_b64 = base64.standard_b64encode(prepare_image(image_bytes)).decode("utf-8")
+        except Exception as exc:
+            raise VisionUnavailable(f"could not prepare image: {exc}") from exc
         try:
             response = self._client.messages.parse(
                 model=self._model,
@@ -46,7 +63,7 @@ class ClaudeVisionProvider:
                 messages=[{
                     "role": "user",
                     "content": [
-                        {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_b64}},
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}},
                         {"type": "text", "text": PROMPT},
                     ],
                 }],
@@ -54,6 +71,8 @@ class ClaudeVisionProvider:
             )
         except (anthropic.APIError, pydantic.ValidationError) as exc:
             raise VisionUnavailable(str(exc)) from exc
+        except Exception as exc:  # e.g. TypeError when no API key resolves
+            raise VisionUnavailable(f"{type(exc).__name__}: {exc}") from exc
         if response.stop_reason == "refusal" or response.parsed_output is None:
             raise VisionUnavailable(f"no structured output (stop_reason={response.stop_reason})")
         return response.parsed_output

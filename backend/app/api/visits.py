@@ -8,12 +8,11 @@ from sqlalchemy.orm import Session
 from app import models
 from app.db import get_db
 from app.schemas import VisitOut, VisitSummary, visit_summary, visit_to_out
-from app.services.photos import ALLOWED_MEDIA_TYPES, fingerprint, store_photo
+from app.services.photos import MAX_PHOTO_BYTES, detect_media_type, fingerprint, store_photo
 from app.services.pipeline import NotAnalyzable, start_analysis
 from app.timeutil import to_utc_naive, utcnow
 
 router = APIRouter(prefix="/visits", tags=["visits"])
-MAX_PHOTO_BYTES = 10 * 1024 * 1024
 
 
 def _get_visit(db: Session, visit_id: int) -> models.Visit:
@@ -21,6 +20,20 @@ def _get_visit(db: Session, visit_id: int) -> models.Visit:
     if visit is None:
         raise HTTPException(404, "Visit not found")
     return visit
+
+
+def read_upload(photo: UploadFile) -> tuple[bytes, str]:
+    """Read an uploaded photo, enforce the size cap and detect its real format. Returns (bytes, media type)."""
+    data = photo.file.read(MAX_PHOTO_BYTES + 1)
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(413, "Photo larger than 10 MB")
+    try:
+        media_type = detect_media_type(data)
+    except UnidentifiedImageError:
+        raise HTTPException(422, "File is not a readable image")
+    if media_type is None:
+        raise HTTPException(415, "Unsupported image format; send JPEG, PNG or WebP")
+    return data, media_type
 
 
 def _analyze(db: Session, visit: models.Visit, background: BackgroundTasks) -> None:
@@ -49,19 +62,12 @@ def create_visit(
         raise HTTPException(404, "Merchant not found")
     if db.get(models.FseProfile, fse_id) is None:
         raise HTTPException(404, "FSE not found")
-    if photo.content_type not in ALLOWED_MEDIA_TYPES:
-        raise HTTPException(415, f"Unsupported image type {photo.content_type}")
-    data = photo.file.read()
-    if len(data) > MAX_PHOTO_BYTES:
-        raise HTTPException(413, "Photo larger than 10 MB")
-    try:
-        sha, phash = fingerprint(data)
-    except UnidentifiedImageError:
-        raise HTTPException(422, "File is not a readable image")
+    data, media_type = read_upload(photo)
+    sha, phash = fingerprint(data)
 
     visit = models.Visit(
-        merchant_id=merchant_id, fse_id=fse_id, photo_path=store_photo(data, photo.content_type),
-        photo_media_type=photo.content_type, photo_sha256=sha, photo_phash=phash, lat=lat, lng=lng,
+        merchant_id=merchant_id, fse_id=fse_id, photo_path=store_photo(data, media_type),
+        photo_media_type=media_type, photo_sha256=sha, photo_phash=phash, lat=lat, lng=lng,
         client_captured_at=to_utc_naive(captured_at), received_at=utcnow(),
         capture_source=capture_source if capture_source in ("camera", "gallery") else "unknown",
     )

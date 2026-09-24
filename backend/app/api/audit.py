@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app import models
 from app.db import get_db
 from app.schemas import AuditOut
-from app.services.photos import ALLOWED_MEDIA_TYPES
+from app.api.visits import read_upload
 from app.services.vision.engine import analyze_bytes
 
 router = APIRouter(prefix="/audit", tags=["audit"])
@@ -14,9 +14,8 @@ router = APIRouter(prefix="/audit", tags=["audit"])
 
 @router.post("/analyze-image")
 def analyze_image(photo: UploadFile = File(...)):
-    if photo.content_type not in ALLOWED_MEDIA_TYPES:
-        raise HTTPException(415, f"Unsupported image type {photo.content_type}")
-    quality, audit, provider = analyze_bytes(photo.file.read(), photo.content_type)
+    data, media_type = read_upload(photo)
+    quality, audit, provider = analyze_bytes(data, media_type)
     return {"quality": asdict(quality), "audit": audit.model_dump(), "provider": provider}
 
 

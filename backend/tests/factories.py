@@ -21,6 +21,12 @@ def sharp_jpeg(seed: int = 0, exif=None) -> bytes:
     return _jpeg(rng.integers(0, 256, (480, 640, 3), dtype=np.uint8), exif)
 
 
+def image_bytes(fmt: str, size=(64, 48)) -> bytes:
+    buf = io.BytesIO()
+    Image.fromarray(np.random.default_rng(5).integers(0, 256, (size[1], size[0], 3), dtype=np.uint8)).save(buf, fmt)
+    return buf.getvalue()
+
+
 def blurry_jpeg() -> bytes:
     return _jpeg(np.full((480, 640, 3), 128, dtype=np.uint8))
 
