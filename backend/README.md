@@ -40,6 +40,11 @@ memory.
   `COGNEE_TIMEOUT_S` (default 8) caps each Cognee lookup; on timeout or error the SQL memory is used
   (`source: "sql_fallback"`).
 
+  Cognee needs its own LLM and embedding provider (for example `LLM_API_KEY`, plus `LLM_PROVIDER`/`LLM_MODEL` and the
+  `EMBEDDING_*` settings if you do not use its OpenAI defaults), set in the environment as described in Cognee's docs.
+  These are Cognee's settings, not SightPay's. Without them `cognify` and search fail, and every lookup silently
+  becomes `sql_fallback`: check the `merchant_context` step's `data.source` to confirm Cognee is actually answering.
+
 Demo: `scripts/demo_visit.sh demo_photos/counter_bad.jpg` → non-compliant → Hindi WhatsApp guidance.
 Offline safety net: VISION_PROVIDER=fixture + photos pinned via scripts/register_fixture.py; unset N8N_WEBHOOK_URL to run inline.
 
