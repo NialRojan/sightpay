@@ -5,6 +5,8 @@ import numpy as np
 from PIL import Image
 
 from app import models
+from app.services.photos import fingerprint, store_photo
+from app.timeutil import utcnow
 
 
 def _jpeg(arr: np.ndarray, exif=None) -> bytes:
@@ -43,3 +45,18 @@ def make_world(db):
     db.add(merchant)
     db.commit()
     return SimpleNamespace(manager=manager, fse=fse, merchant=merchant)
+
+
+def make_visit(db, world, photo: bytes, *, lat=None, lng=None, captured_at=None, capture_source="camera"):
+    sha, phash = fingerprint(photo)
+    now = utcnow()
+    visit = models.Visit(
+        merchant_id=world.merchant.id, fse_id=world.fse.id,
+        photo_path=store_photo(photo, "image/jpeg"), photo_media_type="image/jpeg",
+        photo_sha256=sha, photo_phash=phash,
+        lat=world.merchant.lat if lat is None else lat, lng=world.merchant.lng if lng is None else lng,
+        client_captured_at=captured_at or now, received_at=now, capture_source=capture_source,
+    )
+    db.add(visit)
+    db.commit()
+    return visit
