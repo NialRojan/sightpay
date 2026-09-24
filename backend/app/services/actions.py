@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.services.guidance import build_guidance
+from app.services.localization import localize_guidance
 from app.services.memory import get_memory
 from app.services.memory.base import MerchantContext
 from app.services.steps import append_step
@@ -31,12 +32,14 @@ def create_guidance(db: Session, visit: models.Visit, ctx: MerchantContext | Non
     if existing:
         return existing
     g = build_guidance(visit.merchant, visit.audit, ctx)
+    loc = localize_guidance(g, f"guidance_visit{visit.id}")
     iv = models.Intervention(
         merchant_id=visit.merchant_id, visit_id=visit.id, action=g.action, issue=g.issue,
-        message_text_en=g.text_en, message_text=g.text_local, message_language=g.language,
+        message_text_en=g.text_en, message_text=loc.text, message_language=g.language, audio_path=loc.audio_path,
     )
     db.add(iv)
-    append_step(visit, "guidance", f"Guidance in {g.language}: {g.issue}", {"text": g.text_local})
+    append_step(visit, "guidance", f"{loc.engine}: {g.issue} guidance in {g.language}"
+                + (" with voice note" if loc.audio_path else ""), {"text": loc.text})
     db.commit()
     return iv
 
