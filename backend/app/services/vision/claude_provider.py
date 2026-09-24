@@ -22,6 +22,10 @@ not_a_shop_counter. Use an empty list if none apply.
 - confidence: 0-1, your overall confidence in this assessment. Use a low value if the image is unclear or the counter is out of frame.
 - notes: one short sentence the field rep can act on."""
 
+# Worst case timeout x (retries + 1) = 80 s must stay under the n8n Vision node timeout (90 s).
+CLIENT_TIMEOUT_S = 40.0
+CLIENT_MAX_RETRIES = 1
+
 
 class ClaudeVisionProvider:
     name = "claude"
@@ -29,7 +33,7 @@ class ClaudeVisionProvider:
     def __init__(self, client=None, model: str | None = None):
         if client is None:
             kwargs = {"api_key": settings.anthropic_api_key} if settings.anthropic_api_key else {}
-            client = anthropic.Anthropic(timeout=60.0, max_retries=1, **kwargs)
+            client = anthropic.Anthropic(timeout=CLIENT_TIMEOUT_S, max_retries=CLIENT_MAX_RETRIES, **kwargs)
         self._client = client
         self._model = model or settings.anthropic_model
 

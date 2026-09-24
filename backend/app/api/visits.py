@@ -9,12 +9,11 @@ from app import models
 from app.db import get_db
 from app.schemas import VisitOut, VisitSummary, visit_summary, visit_to_out
 from app.services.photos import ALLOWED_MEDIA_TYPES, fingerprint, store_photo
-from app.services.pipeline import start_analysis
+from app.services.pipeline import NotAnalyzable, start_analysis
 from app.timeutil import to_utc_naive, utcnow
 
 router = APIRouter(prefix="/visits", tags=["visits"])
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
-ANALYZABLE = ("submitted", "failed")
 
 
 def _get_visit(db: Session, visit_id: int) -> models.Visit:
@@ -27,6 +26,8 @@ def _get_visit(db: Session, visit_id: int) -> models.Visit:
 def _analyze(db: Session, visit: models.Visit, background: BackgroundTasks) -> None:
     try:
         start_analysis(db, visit, background)
+    except NotAnalyzable as exc:
+        raise HTTPException(409, f"Visit is already {exc}")
     except Exception:
         pass  # visit.status == "failed" and pipeline_log has the error; the client sees it in the response
 
@@ -74,8 +75,6 @@ def create_visit(
 @router.post("/{visit_id}/analyze", response_model=VisitOut)
 def analyze_visit(visit_id: int, background: BackgroundTasks, db: Session = Depends(get_db)):
     visit = _get_visit(db, visit_id)
-    if visit.status not in ANALYZABLE:
-        raise HTTPException(409, f"Visit is already {visit.status}")
     _analyze(db, visit, background)
     return visit_to_out(db, visit)
 

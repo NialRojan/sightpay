@@ -65,7 +65,8 @@ class Visit(Base):
     decision_reasons: Mapped[list] = mapped_column(JSON, default=list)
     authenticity_score: Mapped[int | None] = mapped_column(Integer)
     authenticity_verdict: Mapped[str | None] = mapped_column(String(20))
-    pipeline_mode: Mapped[str | None] = mapped_column(String(20))  # n8n | inline | inline_fallback
+    pipeline_mode: Mapped[str | None] = mapped_column(String(20))  # n8n | inline | inline_fallback | inline_recovery
+    analysis_started_at: Mapped[datetime | None] = mapped_column(DateTime)  # set when a pipeline run claims the visit
     pipeline_log: Mapped[list] = mapped_column(JSON, default=list)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
 
