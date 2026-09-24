@@ -6,7 +6,7 @@ from app.services.localization import localize_guidance
 from app.services.memory import get_memory
 from app.services.memory.base import MerchantContext
 from app.services.steps import append_step
-from app.services.whatsapp import send_whatsapp_message
+from app.services.whatsapp import resolve_recipient, send_whatsapp_message
 from app.timeutil import utcnow
 
 INCENTIVE_AMOUNT_INR = 50
@@ -49,9 +49,10 @@ def send_whatsapp(db: Session, visit: models.Visit) -> models.Notification:
     if existing:
         return existing
     iv = visit.intervention or create_guidance(db, visit, None)
-    result = send_whatsapp_message(visit.merchant.phone, iv.message_text, iv.audio_url)
+    to_phone = resolve_recipient(visit.merchant.phone)
+    result = send_whatsapp_message(to_phone, iv.message_text, iv.audio_url)
     n = models.Notification(
-        merchant_id=visit.merchant_id, visit_id=visit.id, channel="whatsapp", to_phone=visit.merchant.phone,
+        merchant_id=visit.merchant_id, visit_id=visit.id, channel="whatsapp", to_phone=to_phone,
         body=iv.message_text, audio_url=iv.audio_url, status=result.status,
         provider_ref=result.provider_ref, error=result.error,
     )
