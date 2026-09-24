@@ -57,7 +57,10 @@ def send_whatsapp(db: Session, visit: models.Visit) -> models.Notification:
         provider_ref=result.provider_ref, error=result.error,
     )
     db.add(n)
-    append_step(visit, "whatsapp", f"WhatsApp {result.status} to {visit.merchant.owner_name}")
+    summary = f"WhatsApp {result.status} to {visit.merchant.owner_name}"
+    if to_phone != visit.merchant.phone:
+        summary += f" (redirected to demo phone {to_phone[:3]}…{to_phone[-4:]})"
+    append_step(visit, "whatsapp", summary)
     db.commit()
     return n
 

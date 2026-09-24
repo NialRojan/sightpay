@@ -99,3 +99,18 @@ def test_pipeline_records_demo_recipient(db, monkeypatch):
     n = v.notifications[0]
     assert (n.status, n.to_phone) == ("dry_run", "+919999999999")
     assert sent_to == ["+919999999999"] != [world.merchant.phone]
+
+
+def test_redirect_is_named_in_pipeline_log(db, monkeypatch):
+    monkeypatch.setattr(settings, "whatsapp_demo_to", "+919999991234")
+    world = make_world(db)
+    v = run_inline(db, make_visit(db, world, sharp_jpeg(46)).id)
+    summary = next(s["summary"] for s in v.pipeline_log if s["step"] == "whatsapp")
+    assert summary == f"WhatsApp dry_run to {world.merchant.owner_name} (redirected to demo phone +91…1234)"
+
+
+def test_unredirected_summary_is_unchanged(db):
+    world = make_world(db)
+    v = run_inline(db, make_visit(db, world, sharp_jpeg(47)).id)
+    summary = next(s["summary"] for s in v.pipeline_log if s["step"] == "whatsapp")
+    assert summary == f"WhatsApp dry_run to {world.merchant.owner_name}"
