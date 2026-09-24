@@ -1,4 +1,5 @@
 import base64
+import binascii
 from dataclasses import dataclass
 
 import httpx
@@ -26,11 +27,13 @@ class Transcript:
 
 class SarvamClient:
     def __init__(self, api_key: str, base_url: str = BASE_URL, timeout: float = 20.0):
-        self._http = httpx.Client(base_url=base_url, headers={"api-subscription-key": api_key}, timeout=timeout)
+        # One short-lived connection per call (httpx.post closes it), so a client never leaks sockets.
+        self._base_url, self._timeout = base_url.rstrip("/"), timeout
+        self._headers = {"api-subscription-key": api_key}
 
     def _post(self, path: str, **kwargs) -> dict:
         try:
-            res = self._http.post(path, **kwargs)
+            res = httpx.post(f"{self._base_url}{path}", headers=self._headers, timeout=self._timeout, **kwargs)
             res.raise_for_status()
             return res.json()
         except (httpx.HTTPError, ValueError) as exc:
@@ -51,13 +54,20 @@ class SarvamClient:
         data = self._post("/translate", json={
             "input": text, "source_language_code": source, "target_language_code": target, "model": TRANSLATE_MODEL,
         })
-        return self._field(data, "/translate", "translated_text")
+        out = self._field(data, "/translate", "translated_text")
+        if not isinstance(out, str) or not out.strip():
+            raise SarvamError(f"/translate: empty or non-text translation {str(out)[:200]}")
+        return out
 
     def tts(self, text: str, language: str) -> bytes:
         data = self._post("/text-to-speech", json={
             "text": text, "language_code": language, "speaker": TTS_SPEAKER, "model": TTS_MODEL,
         })
-        return base64.b64decode(self._field(data, "/text-to-speech", "audios", 0))
+        audio = self._field(data, "/text-to-speech", "audios", 0)
+        try:
+            return base64.b64decode(audio, validate=True)
+        except (binascii.Error, TypeError, ValueError) as exc:
+            raise SarvamError(f"/text-to-speech: audio is not valid base64: {exc}") from exc
 
     def stt(self, audio: bytes, filename: str, content_type: str = "audio/wav") -> Transcript:
         data = self._post(
@@ -65,7 +75,10 @@ class SarvamClient:
             files={"file": (filename, audio, content_type)},
             data={"model": STT_MODEL, "mode": STT_MODE, "language_code": "unknown"},
         )
-        return Transcript(self._field(data, "/speech-to-text", "transcript"), data.get("language_code") or "hi-IN")
+        text = self._field(data, "/speech-to-text", "transcript")
+        if not isinstance(text, str):
+            raise SarvamError(f"/speech-to-text: non-text transcript {str(text)[:200]}")
+        return Transcript(text, data.get("language_code") or "hi-IN")
 
 
 def get_sarvam() -> SarvamClient | None:

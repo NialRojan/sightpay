@@ -48,3 +48,47 @@ def test_errors_become_sarvam_error():
     respx.post(f"{API}/text-to-speech").mock(return_value=httpx.Response(200, json={"unexpected": 1}))
     with pytest.raises(SarvamError):
         SarvamClient("k").tts("x", "hi-IN")
+
+
+@respx.mock
+def test_tts_malformed_audio_becomes_sarvam_error():
+    route = respx.post(f"{API}/text-to-speech")
+    for bad in ("not base64!!", 12345, None):
+        route.mock(return_value=httpx.Response(200, json={"audios": [bad]}))
+        with pytest.raises(SarvamError):
+            SarvamClient("k").tts("x", "hi-IN")
+
+
+@respx.mock
+def test_translate_null_or_empty_becomes_sarvam_error():
+    route = respx.post(f"{API}/translate")
+    for bad in (None, "", "   ", 7):
+        route.mock(return_value=httpx.Response(200, json={"translated_text": bad}))
+        with pytest.raises(SarvamError):
+            SarvamClient("k").translate("Hi", "en-IN", "hi-IN")
+
+
+@respx.mock
+def test_stt_non_text_transcript_becomes_sarvam_error():
+    respx.post(f"{API}/speech-to-text").mock(return_value=httpx.Response(200, json={"transcript": None}))
+    with pytest.raises(SarvamError):
+        SarvamClient("k").stt(b"RIFF", "q.wav")
+
+
+@respx.mock
+def test_client_leaves_no_open_http_connections(monkeypatch):
+    opened = []
+    real_init = httpx.Client.__init__
+
+    def tracking_init(self, *a, **k):
+        real_init(self, *a, **k)
+        opened.append(self)
+
+    monkeypatch.setattr(httpx.Client, "__init__", tracking_init)
+    respx.post(f"{API}/translate").mock(return_value=httpx.Response(200, json={"translated_text": "नमस्ते"}))
+    respx.post(f"{API}/text-to-speech").mock(
+        return_value=httpx.Response(200, json={"audios": [base64.b64encode(b"RIFF").decode()]}))
+    client = SarvamClient("k")
+    client.translate("Hello", "en-IN", "hi-IN")
+    client.tts("नमस्ते", "hi-IN")
+    assert opened and all(c.is_closed for c in opened)

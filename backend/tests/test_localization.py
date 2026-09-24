@@ -62,3 +62,15 @@ def test_no_key_uses_template_without_network(db):
     v = run_inline(db, make_visit(db, world, sharp_jpeg(92)).id)
     assert v.intervention.message_text.startswith("नमस्ते Ramesh जी")
     assert any(s["summary"].startswith("template:") for s in v.pipeline_log if s["step"] == "guidance")
+
+
+@respx.mock
+def test_null_translation_falls_back_to_template_and_completes_visit(db, monkeypatch):
+    monkeypatch.setattr(settings, "sarvam_api_key", "k")
+    respx.post(f"{API}/translate").mock(return_value=httpx.Response(200, json={"translated_text": None}))
+    respx.post(f"{API}/text-to-speech").mock(return_value=httpx.Response(200, json={"audios": ["%%%"]}))
+    world = make_world(db)
+    v = run_inline(db, make_visit(db, world, sharp_jpeg(94)).id)
+    assert v.status == "completed"
+    assert v.intervention.message_text.startswith("नमस्ते Ramesh जी")
+    assert v.intervention.audio_path is None
