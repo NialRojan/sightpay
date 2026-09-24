@@ -78,8 +78,11 @@ def _todays_visits(db: Session, fse_id: int, lat: float | None, lng: float | Non
     top = priority_queue(db, fse_id, lat, lng)[:3]
     if not top:
         return "All your merchants are covered today."
-    lines = [f"{i}. {r['name']}, {r['reasons'][0][:1].lower()}{r['reasons'][0][1:]}" for i, r in enumerate(top, 1)]
-    return "Visit today: " + ". ".join(lines) + "."
+    # Full sentences with ordinal words translate cleanly; a terse "1. X, score 42. 2. Y" list made Sarvam
+    # mistranslate the heading and merge "42. 2." into "42.3".
+    ordinals = ("First", "Second", "Third")
+    lines = [f"{o}, {r['name']}: {r['reasons'][0][:1].lower()}{r['reasons'][0][1:]}." for o, r in zip(ordinals, top)]
+    return "Please visit these merchants today. " + " ".join(lines)
 
 
 def answer_query(db: Session, fse_id: int, transcript: str, language: str = "en-IN",
