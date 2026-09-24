@@ -143,3 +143,13 @@ def test_claude_worst_case_fits_under_n8n_vision_timeout():
     vision = next(n for n in wf["nodes"] if "/vision" in json.dumps(n.get("parameters", {})))
     n8n_ms = vision["parameters"]["options"]["timeout"]
     assert cp.CLIENT_TIMEOUT_S * (cp.CLIENT_MAX_RETRIES + 1) * 1000 < n8n_ms
+
+
+def test_malformed_webhook_url_falls_back_inline(client, db, monkeypatch):
+    monkeypatch.setattr(settings, "n8n_webhook_url", "localhost:5678/webhook/sightpay-visit")  # no scheme
+    monkeypatch.setattr(pipeline, "SessionLocal", lambda: db)
+    world = make_world(db)
+    vid = make_visit(db, world, sharp_jpeg(97)).id
+    client.post(f"/api/visits/{vid}/analyze")
+    after = client.get(f"/api/visits/{vid}").json()
+    assert after["status"] == "completed" and after["pipeline_mode"] == "inline_fallback"

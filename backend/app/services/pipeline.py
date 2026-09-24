@@ -167,8 +167,9 @@ def _post_to_n8n(visit_id: int, merchant_id: int) -> None:
     try:
         res = httpx.post(settings.n8n_webhook_url, json={"visit_id": visit_id, "merchant_id": merchant_id}, timeout=5.0)
         res.raise_for_status()
-    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.HTTPStatusError) as exc:
-        # n8n never got (or refused) the visit, so it is safe to run it here.
+    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.HTTPStatusError, httpx.UnsupportedProtocol) as exc:
+        # n8n never got (or refused) the visit, so it is safe to run it here. UnsupportedProtocol = a malformed
+        # N8N_WEBHOOK_URL (e.g. missing http://): the request was never sent.
         log.warning("n8n unreachable (%s); running pipeline inline for visit %s", exc, visit_id)
         db = SessionLocal()
         try:
