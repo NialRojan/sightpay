@@ -12,6 +12,9 @@ BASE_URL = "https://api.sarvam.ai"
 TRANSLATE_MODEL = "mayura:v1"  # input limit: 1000 characters
 TTS_MODEL = "bulbul:v3"
 TTS_SPEAKER = "priya"
+# WhatsApp voice notes accept mp3/ogg/aac/amr but not WAV, and browsers play mp3, so ask Sarvam for mp3.
+TTS_CODEC = "mp3"
+AUDIO_EXT = ".mp3"
 STT_MODEL = "saaras:v3"
 STT_MODE = "transcribe"
 
@@ -65,6 +68,7 @@ class SarvamClient:
     def tts(self, text: str, language: str) -> bytes:
         data = self._post("/text-to-speech", json={
             "text": text, "language_code": language, "speaker": TTS_SPEAKER, "model": TTS_MODEL,
+            "output_audio_codec": TTS_CODEC,
         })
         audio = self._field(data, "/text-to-speech", "audios", 0)
         try:

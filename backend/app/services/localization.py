@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from app.services.guidance import Guidance
 from app.services.photos import store_media
-from app.services.sarvam import SarvamError, get_sarvam
+from app.services.sarvam import AUDIO_EXT, SarvamError, get_sarvam
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def localize_guidance(g: Guidance, name_prefix: str) -> LocalizedGuidance:
 
     audio_path = None
     try:
-        audio_path = store_media(client.tts(text, g.language), name_prefix, ".wav")
+        audio_path = store_media(client.tts(text, g.language), name_prefix, AUDIO_EXT)
         engine = "sarvam" if engine == "sarvam" else "sarvam_tts"
     except SarvamError as exc:
         log.warning("Sarvam TTS failed, sending text only: %s", exc)

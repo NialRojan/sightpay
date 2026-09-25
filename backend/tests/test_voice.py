@@ -82,7 +82,7 @@ def test_voice_endpoint_full_sarvam_loop(client, db, monkeypatch):
     res = client.post("/api/voice/query", data={"fse_id": fid}, files={"audio": ("q.wav", b"RIFF", "audio/wav")}).json()
     assert res["intent"] == "todays_visits" and res["language"] == "hi-IN"
     assert res["answer_local"] == "आज इन दुकानों पर जाइए"
-    assert res["audio_url"].endswith(".wav")
+    assert res["audio_url"].endswith(".mp3")
 
 
 def test_voice_endpoint_requires_text_or_audio(client, db):

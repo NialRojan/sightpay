@@ -72,7 +72,7 @@ UI copy rule: authenticity is "combined evidence signals", never "EXIF-verified"
 Guidance, WhatsApp and memory details:
 - **`actions.intervention`**: `message_text_en` is the English diagnosis, `message_text` is what the merchant receives in
   `message_language`. With `SARVAM_API_KEY` set, `message_text` is a Sarvam translation and `audio_url` is a Sarvam voice
-  note (`.wav`). Without a key, or when Sarvam fails, `message_text` is the curated Hindi/Marathi template and `audio_url`
+  note (`.mp3`, which WhatsApp and browsers both play). Without a key, or when Sarvam fails, `message_text` is the curated Hindi/Marathi template and `audio_url`
   is `null`. A Sarvam failure never fails the visit.
 - **`guidance` step summary** is `"{engine}: {issue} guidance in {language}"`, followed by `" with voice note"` when
   `audio_url` is set. `engine` is `sarvam` (translated + voiced), `sarvam_tts` (template text, voiced) or `template`
