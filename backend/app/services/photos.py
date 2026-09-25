@@ -36,5 +36,13 @@ def store_photo(data: bytes, media_type: str) -> str:
     return name
 
 
+def store_media(data: bytes, prefix: str, ext: str) -> str:
+    name = f"{prefix}_{uuid.uuid4().hex[:8]}{ext}"
+    path = Path(settings.upload_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    (path / name).write_bytes(data)
+    return name
+
+
 def read_photo(visit) -> bytes:
     return (Path(settings.upload_dir) / visit.photo_path).read_bytes()

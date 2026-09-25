@@ -181,7 +181,7 @@ class Notification(Base):
     to_phone: Mapped[str] = mapped_column(String(20))
     body: Mapped[str] = mapped_column(Text)
     audio_url: Mapped[str | None] = mapped_column(String(300))
-    status: Mapped[str] = mapped_column(String(20))  # dry_run | sent | failed
+    status: Mapped[str] = mapped_column(String(20))  # dry_run | sent | delivered | read | failed | undelivered
     provider_ref: Mapped[str | None] = mapped_column(String(80))
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

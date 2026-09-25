@@ -2,10 +2,11 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.services.guidance import build_guidance
+from app.services.localization import localize_guidance
 from app.services.memory import get_memory
 from app.services.memory.base import MerchantContext
 from app.services.steps import append_step
-from app.services.whatsapp import send_whatsapp_message
+from app.services.whatsapp import resolve_recipient, send_whatsapp_message
 from app.timeutil import utcnow
 
 INCENTIVE_AMOUNT_INR = 50
@@ -31,12 +32,14 @@ def create_guidance(db: Session, visit: models.Visit, ctx: MerchantContext | Non
     if existing:
         return existing
     g = build_guidance(visit.merchant, visit.audit, ctx)
+    loc = localize_guidance(g, f"guidance_visit{visit.id}")
     iv = models.Intervention(
         merchant_id=visit.merchant_id, visit_id=visit.id, action=g.action, issue=g.issue,
-        message_text_en=g.text_en, message_text=g.text_local, message_language=g.language,
+        message_text_en=g.text_en, message_text=loc.text, message_language=g.language, audio_path=loc.audio_path,
     )
     db.add(iv)
-    append_step(visit, "guidance", f"Guidance in {g.language}: {g.issue}", {"text": g.text_local})
+    append_step(visit, "guidance", f"{loc.engine}: {g.issue} guidance in {g.language}"
+                + (" with voice note" if loc.audio_path else ""), {"text": loc.text})
     db.commit()
     return iv
 
@@ -46,14 +49,18 @@ def send_whatsapp(db: Session, visit: models.Visit) -> models.Notification:
     if existing:
         return existing
     iv = visit.intervention or create_guidance(db, visit, None)
-    result = send_whatsapp_message(visit.merchant.phone, iv.message_text, iv.audio_url)
+    to_phone = resolve_recipient(visit.merchant.phone)
+    result = send_whatsapp_message(to_phone, iv.message_text, iv.audio_url)
     n = models.Notification(
-        merchant_id=visit.merchant_id, visit_id=visit.id, channel="whatsapp", to_phone=visit.merchant.phone,
+        merchant_id=visit.merchant_id, visit_id=visit.id, channel="whatsapp", to_phone=to_phone,
         body=iv.message_text, audio_url=iv.audio_url, status=result.status,
         provider_ref=result.provider_ref, error=result.error,
     )
     db.add(n)
-    append_step(visit, "whatsapp", f"WhatsApp {result.status} to {visit.merchant.owner_name}")
+    summary = f"WhatsApp {result.status} to {visit.merchant.owner_name}"
+    if to_phone != visit.merchant.phone:
+        summary += f" (redirected to demo phone {to_phone[:3]}…{to_phone[-4:]})"
+    append_step(visit, "whatsapp", summary)
     db.commit()
     return n
 

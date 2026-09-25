@@ -1,0 +1,103 @@
+import base64
+
+import httpx
+import pytest
+import respx
+
+from app.services.sarvam import SarvamClient, SarvamError
+
+API = "https://api.sarvam.ai"
+
+
+@respx.mock
+def test_translate_sends_key_and_fields():
+    route = respx.post(f"{API}/translate").mock(return_value=httpx.Response(200, json={"translated_text": "नमस्ते"}))
+    out = SarvamClient("k").translate("Hello", "en-IN", "hi-IN")
+    assert out == "नमस्ते"
+    req = route.calls[0].request
+    assert req.headers["api-subscription-key"] == "k"
+    assert b'"target_language_code":"hi-IN"' in req.content.replace(b" ", b"")
+
+
+def test_translate_same_language_is_a_noop():
+    assert SarvamClient("k").translate("Hello", "en-IN", "en-IN") == "Hello"
+
+
+@respx.mock
+def test_tts_decodes_audio():
+    route = respx.post(f"{API}/text-to-speech").mock(
+        return_value=httpx.Response(200, json={"audios": [base64.b64encode(b"RIFFwav").decode()]}))
+    assert SarvamClient("k").tts("नमस्ते", "hi-IN") == b"RIFFwav"
+    assert b'"language_code":"hi-IN"' in route.calls[0].request.content.replace(b" ", b"")
+    assert b'"output_audio_codec":"mp3"' in route.calls[0].request.content.replace(b" ", b"")
+
+
+@respx.mock
+def test_stt_returns_transcript_and_language():
+    route = respx.post(f"{API}/speech-to-text").mock(
+        return_value=httpx.Response(200, json={"transcript": "आज कौन से मर्चेंट", "language_code": "hi-IN"}))
+    t = SarvamClient("k").stt(b"RIFF", "q.wav")
+    assert (t.text, t.language_code) == ("आज कौन से मर्चेंट", "hi-IN")
+    assert b"saaras:v3" in route.calls[0].request.content
+
+
+@respx.mock
+def test_errors_become_sarvam_error():
+    respx.post(f"{API}/translate").mock(return_value=httpx.Response(429))
+    with pytest.raises(SarvamError):
+        SarvamClient("k").translate("Hi", "en-IN", "hi-IN")
+    respx.post(f"{API}/text-to-speech").mock(return_value=httpx.Response(200, json={"unexpected": 1}))
+    with pytest.raises(SarvamError):
+        SarvamClient("k").tts("x", "hi-IN")
+
+
+@respx.mock
+def test_tts_malformed_audio_becomes_sarvam_error():
+    route = respx.post(f"{API}/text-to-speech")
+    for bad in ("not base64!!", 12345, None):
+        route.mock(return_value=httpx.Response(200, json={"audios": [bad]}))
+        with pytest.raises(SarvamError):
+            SarvamClient("k").tts("x", "hi-IN")
+
+
+@respx.mock
+def test_translate_null_or_empty_becomes_sarvam_error():
+    route = respx.post(f"{API}/translate")
+    for bad in (None, "", "   ", 7):
+        route.mock(return_value=httpx.Response(200, json={"translated_text": bad}))
+        with pytest.raises(SarvamError):
+            SarvamClient("k").translate("Hi", "en-IN", "hi-IN")
+
+
+@respx.mock
+def test_stt_non_text_transcript_becomes_sarvam_error():
+    respx.post(f"{API}/speech-to-text").mock(return_value=httpx.Response(200, json={"transcript": None}))
+    with pytest.raises(SarvamError):
+        SarvamClient("k").stt(b"RIFF", "q.wav")
+
+
+@respx.mock
+def test_client_leaves_no_open_http_connections(monkeypatch):
+    opened = []
+    real_init = httpx.Client.__init__
+
+    def tracking_init(self, *a, **k):
+        real_init(self, *a, **k)
+        opened.append(self)
+
+    monkeypatch.setattr(httpx.Client, "__init__", tracking_init)
+    respx.post(f"{API}/translate").mock(return_value=httpx.Response(200, json={"translated_text": "नमस्ते"}))
+    respx.post(f"{API}/text-to-speech").mock(
+        return_value=httpx.Response(200, json={"audios": [base64.b64encode(b"RIFF").decode()]}))
+    client = SarvamClient("k")
+    client.translate("Hello", "en-IN", "hi-IN")
+    client.tts("नमस्ते", "hi-IN")
+    assert opened and all(c.is_closed for c in opened)
+
+
+@respx.mock
+def test_http_error_includes_sarvam_reason():
+    respx.post(f"{API}/text-to-speech").mock(
+        return_value=httpx.Response(400, json={"error": {"message": "speaker not compatible with model"}}))
+    with pytest.raises(SarvamError, match="HTTP 400.*speaker not compatible"):
+        SarvamClient("k").tts("x", "hi-IN")

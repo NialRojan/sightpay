@@ -6,4 +6,8 @@ __all__ = ["MemoryStore", "MerchantContext", "get_memory"]
 
 
 def get_memory() -> MemoryStore:
+    if settings.memory_backend == "cognee":
+        from app.services.memory.cognee_memory import CogneeMemory
+
+        return CogneeMemory()
     return SqlMemory()

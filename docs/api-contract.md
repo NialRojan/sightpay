@@ -69,6 +69,32 @@ actions {incentive, intervention {message_text, message_text_en, message_languag
 
 UI copy rule: authenticity is "combined evidence signals", never "EXIF-verified".
 
+Guidance, WhatsApp and memory details:
+- **`actions.intervention`**: `message_text_en` is the English diagnosis, `message_text` is what the merchant receives in
+  `message_language`. With `SARVAM_API_KEY` set, `message_text` is a Sarvam translation and `audio_url` is a Sarvam voice
+  note (`.mp3`, which WhatsApp and browsers both play). Without a key, or when Sarvam fails, `message_text` is the curated Hindi/Marathi template and `audio_url`
+  is `null`. A Sarvam failure never fails the visit.
+- **`guidance` step summary** is `"{engine}: {issue} guidance in {language}"`, followed by `" with voice note"` when
+  `audio_url` is set. `engine` is `sarvam` (translated + voiced), `sarvam_tts` (template text, voiced) or `template`
+  (no Sarvam). `data.text` is the text that was sent.
+- **`actions.notifications[].status`** is `dry_run` | `sent` | `delivered` | `read` | `failed` | `undelivered`. `sent`
+  only means Twilio accepted the message; `delivered`, `read` and `undelivered` (and a later `failed`) arrive afterwards
+  from Twilio's status callback (see [Webhooks](#webhooks-twilio-facing)), which also sets `error` to
+  `"Twilio <ErrorCode>: <ErrorMessage>"` and adds a `whatsapp_status` step (e.g. `"WhatsApp undelivered (Twilio 63015)"`).
+  Without a public `PUBLIC_BASE_URL` no callback is requested and a Twilio message stays `sent`. Twilio is used only when `WHATSAPP_MODE=twilio`
+  **and** both `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are set; otherwise the message is logged as `dry_run`. A
+  Twilio error is recorded as `failed` with `error` set (the visit still completes); `provider_ref` is the Twilio message
+  SID when `sent`. `to_phone` is the number actually messaged: `WHATSAPP_DEMO_TO` when that is set, otherwise the
+  merchant's phone. When redirected, the `whatsapp` step summary ends with `" (redirected to demo phone +91…1234)"`
+  (first three and last four characters of `WHATSAPP_DEMO_TO`). The voice note goes as a second WhatsApp message right after the text
+  (WhatsApp drops the caption of a voice note), and only when `audio_url` is on a public host (not `localhost` or a
+  private/LAN IP, which Twilio cannot fetch); `audio_url` is stored on the notification either way. `provider_ref` and
+  the delivery status track the text message; a failed voice note is noted in `error` (`voice note not sent: ...`) while
+  the status stays `sent`.
+- **Merchant memory `source`** (`merchant_context` step `data.source`, and `context.source` on `GET /merchants/{id}`)
+  is `sql` (`MEMORY_BACKEND=sql`), `cognee` (the summary came from Cognee) or `sql_fallback` (`MEMORY_BACKEND=cognee`
+  but Cognee errored, returned nothing, or took longer than `COGNEE_TIMEOUT_S`, so the SQL summary is used).
+
 #### Example: `POST /visits` with `analyze=true` (compliant → incentive)
 
 ```bash
@@ -163,7 +189,7 @@ Same photo submitted again as a fresh visit (fraud, duplicate image) yields `sta
     {"step": "fraud_check", "at": "2026-09-24T20:18:27.556336", "summary": "Authenticity 90/100 VERIFIED"},
     {"step": "vision_ai", "at": "2026-09-24T20:18:27.563200", "summary": "QR visibility 38, confidence 0.93 (fixture)"},
     {"step": "decision", "at": "2026-09-24T20:18:27.565406", "summary": "non_compliant: QR visibility 38 below 70; Paytm QR obstructed"},
-    {"step": "guidance", "at": "2026-09-24T20:18:27.566261", "summary": "Guidance in hi-IN: QR poorly positioned", "data": {"text": "नमस्ते Ramesh जी, Paytm QR को बिलिंग काउंटर के पास रखिए ताकि ग्राहकों को साफ़ दिखे।"}},
+    {"step": "guidance", "at": "2026-09-24T20:18:27.566261", "summary": "template: QR poorly positioned guidance in hi-IN", "data": {"text": "नमस्ते Ramesh जी, Paytm QR को बिलिंग काउंटर के पास रखिए ताकि ग्राहकों को साफ़ दिखे।"}},
     {"step": "whatsapp", "at": "2026-09-24T20:18:27.609127", "summary": "WhatsApp dry_run to Ramesh Shinde"},
     {"step": "complete", "at": "2026-09-24T20:18:27.610018", "summary": "Visit completed"}
   ],
@@ -210,7 +236,7 @@ Same photo submitted again as a fresh visit (fraud, duplicate image) yields `sta
 ## Merchants
 
 - `GET /merchants` → `[{id, name, owner_name, language, lat, lng, category, assigned_fse_name, latest_score, latest_decision, last_visit_at}]`
-- `GET /merchants/{id}` → `{merchant, context (memory: previous_scores, previous_issues, previous_interventions, consecutive_non_compliant, summary), recent_visits[], interventions[], open_escalations[]}`
+- `GET /merchants/{id}` → `{merchant, context (memory: previous_scores, previous_issues, previous_interventions, consecutive_non_compliant, summary, source sql|cognee|sql_fallback), recent_visits[], interventions[], open_escalations[]}`
 - `GET /merchants/{id}/impact` → **coming in P2 (404 today)**: observed transaction change around the latest intervention
 
 #### Example: `GET /merchants/1`
@@ -313,9 +339,85 @@ Approval semantics:
 }
 ```
 
+## Rep intelligence
+
+All `/fse/{id}/...` endpoints return **404 for an unknown FSE**. "Visited" below means a **usable** visit: status
+`completed` or `escalated`. Blocked, rejected, failed and in-flight visits do not count for the queue or coverage.
+
+- `GET /fse` → `[{id, name, territory, home_lat, home_lng}]`
+- `GET /fse/{id}/queue?lat=&lng=` → `[{merchant_id, name, owner_name, lat, lng, distance_m, priority, reasons[], latest_score, latest_decision, days_since_visit}]`
+  The FSE's assigned merchants, highest `priority` first. Merchants with a usable visit today (UTC date) are left out.
+  `lat`/`lng` (the rep's position) are optional: without them `distance_m` is `null` and distance does not affect the order.
+  `latest_score`, `latest_decision` and `days_since_visit` come from the latest usable visit (`null` if there is none).
+  Priority: 100 − last QR score (60 if never audited) + 2 per day since the visit (max 30 days; 60 if never visited)
+  + 20 for an open issue (latest decision `non_compliant`/`low_confidence`) + 15 if transactions fell > 10% week on week
+  − 5 per km away (max 30).
+- `GET /fse/{id}/summary?lat=&lng=` → `{fse{id, name, territory}, coverage{assigned, visited, coverage_pct}, performance{visits, verified_pct, compliant_pct, avg_authenticity, incentives_inr, conversions}, next_best}`
+  `coverage`: assigned merchants with a usable visit in the last 30 days. `performance`: all of the FSE's visits in the
+  last 30 days (`verified_pct`, `compliant_pct`, `avg_authenticity` are `null` when there are none); `conversions` counts
+  merchants that went from `non_compliant` to `compliant`. `next_best` is the first queue entry, or `null`.
+- `GET /fse/{id}/visits?days=7` → `[VisitSummary]` (the same shape as `recent_visits[]`), oldest first, for the visit map.
+  `days` must be 1-365 (422 otherwise). All statuses are included; colour pins by `status`/`decision`.
+
+#### Example: `GET /fse/1/summary?lat=18.510189&lng=73.7982`
+
+```json
+{
+  "fse": {"id": 1, "name": "Amit Patil", "territory": "Kothrud"},
+  "coverage": {"assigned": 8, "visited": 8, "coverage_pct": 100.0},
+  "performance": {"visits": 8, "verified_pct": 100.0, "compliant_pct": 50.0, "avg_authenticity": 92.0, "incentives_inr": 200, "conversions": 1},
+  "next_best": {
+    "merchant_id": 10, "name": "Om Sweets", "owner_name": "Deepak Agarwal", "lat": 18.513589, "lng": 73.79783,
+    "distance_m": 380, "priority": 135.1,
+    "reasons": ["Last QR score 33", "Not visited for 25 days", "Open issue: Competitor QR dominance"],
+    "latest_score": 33, "latest_decision": "non_compliant", "days_since_visit": 25
+  }
+}
+```
+
+`GET /fse/1/queue` returns a list of entries shaped like `next_best`.
+
+## Voice (Sarvam)
+
+- `POST /voice/query` (multipart/form-data)
+  fields: `fse_id` (int), `merchant_id` (int, optional: the merchant open on screen), `lat`, `lng` (optional), and either
+  `audio` (wav/webm ≤ 10 MB) or `text` + `language` (default `hi-IN`)
+  → `{transcript, language, intent (todays_visits|merchant_issue|unknown), answer_en, answer_local, audio_url, merchant_id}`
+  With `audio`, Sarvam speech-to-text (`saaras:v3`) produces `transcript` and detects `language`; the `language` field is
+  ignored. `answer_local` is `answer_en` translated to `language` and `audio_url` is the spoken answer; without a Sarvam
+  key, or if translation/TTS fails, `answer_local` is the English text and `audio_url` is `null`.
+  errors: 422 neither `text` nor `audio` · 404 unknown fse · 413 audio larger than 10 MB ·
+  503 `audio` sent but `SARVAM_API_KEY` is not set · 502 Sarvam speech-to-text failed
+- `POST /voice/tts` body `{text, language?}` (`language` defaults to `hi-IN`) → `{audio_url}` ·
+  503 `SARVAM_API_KEY` is not set · 502 Sarvam TTS failed
+
+#### Example: `POST /voice/query` with `fse_id=1`, `merchant_id=1`, `text=is merchant ka problem kya hai?` (no Sarvam key)
+
+```json
+{
+  "transcript": "is merchant ka problem kya hai?", "language": "hi-IN", "intent": "merchant_issue",
+  "answer_en": "Ramesh General Store: QR visibility score 42 out of 100. Main issue: QR obstruction. PhonePe QR is more prominent than Paytm. This has not been fixed for 2 visits.",
+  "answer_local": "Ramesh General Store: QR visibility score 42 out of 100. Main issue: QR obstruction. PhonePe QR is more prominent than Paytm. This has not been fixed for 2 visits.",
+  "audio_url": null, "merchant_id": 1
+}
+```
+
 ## Supporting
 
 - `GET /visits?fse_id=&merchant_id=&limit=` · `GET /fraud/flagged` · `GET /fraud/{visit_id}` · `GET /audit/{visit_id}`
 - `POST /audit/analyze-image` (multipart photo) → `{quality, audit, provider}` (stateless try-it; same 413/415/422 rules as `POST /visits`)
 - `GET /incentives?fse_id=` → `{total_inr, items[]}` · `GET /transactions?merchant_id=&days=30`
 - `GET /health` → which providers are live (`vision_provider`, `anthropic_key` (a key is configured), `n8n`, `memory`, `whatsapp`)
+
+## Webhooks (Twilio-facing)
+
+**Called by Twilio, not the frontend.**
+
+- `POST /webhooks/twilio/status` (form-encoded Twilio status callback: `MessageSid`, `MessageStatus`, optional
+  `ErrorCode`, `ErrorMessage`) → `204`, empty body. The backend asks Twilio for this callback (`StatusCallback`) only
+  when `PUBLIC_BASE_URL` is publicly reachable (e.g. an ngrok `https://….ngrok.app` URL), because Twilio cannot reach
+  `localhost` or LAN addresses. Requests must carry a valid `X-Twilio-Signature` computed with `TWILIO_AUTH_TOKEN` over
+  `PUBLIC_BASE_URL` + the request path; a missing or wrong signature, or no Twilio auth token configured, → `403`.
+  The notification whose `provider_ref` equals `MessageSid` moves to `delivered`, `read`, `failed` or `undelivered`;
+  `queued`/`sending`/`sent` are ignored and a status never moves backwards (a late `delivered` after `read` keeps
+  `read`). An unknown `MessageSid` is a no-op `204` (Twilio retries on non-2xx).
