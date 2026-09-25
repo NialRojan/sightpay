@@ -3,6 +3,10 @@
 Status as of the `feat/frontend-integration` foundation commit. Read this together with
 [`api-contract.md`](api-contract.md) (the source of truth for every payload).
 
+> **Update (integration finished):** every page now runs on the real API; `services/legacy.js`, `demoData.js` and
+> `pages/Pages.jsx` are gone. The sections below are the original plan and page map; notes about shims and demo data
+> describe the starting point, not the current code. How to run everything: the repository [README](../README.md).
+
 What is done:
 
 - `frontend/src/services/api.js` is a real client: `get`, `post` (JSON), `postForm` (multipart), `request`, and
