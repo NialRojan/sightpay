@@ -22,8 +22,8 @@ const groups = [
     [
       ['Operations Dashboard', '/fse', LayoutDashboard],
       ['AI Priority Queue', '/queue', Route],
-      ['Merchant 360', '/merchants/m1', Store],
-      ['Visit Audit / Evidence', '/visits/SP-10482', Camera],
+      ['Merchant 360', '/fse/merchants', Store],
+      ['Visit Audit / Evidence', '/fse/visits', Camera],
       ['Manager Command Center', '/manager', Command],
       ['Impact Analytics', '/analytics', Activity],
     ],
