@@ -166,3 +166,41 @@ def test_import_cognee_exports_dotenv_without_overriding_real_env(tmp_path, monk
         assert os.environ["SIGHTPAY_TEST_LLM_MODEL"] == "from_shell"
     finally:
         os.environ.pop("SIGHTPAY_TEST_EMBEDDING_PROVIDER", None)
+
+
+def test_adapter_reuses_one_event_loop_across_calls_and_threads(monkeypatch):
+    """Cognee binds internal locks to the first event loop; a new loop per call broke every call after the first."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.services.memory import cognee_memory
+
+    first_loop = []
+
+    def _check_loop():
+        loop = asyncio.get_running_loop()
+        first_loop.append(first_loop[0] if first_loop else loop)
+        if loop is not first_loop[0]:
+            raise RuntimeError("<asyncio.locks.Lock> is bound to a different event loop")
+
+    async def add(text, dataset_name):
+        _check_loop()
+
+    async def cognify(datasets):
+        _check_loop()
+
+    async def search(query_text, query_type, datasets):
+        _check_loop()
+        return [f"answer for {datasets[0]}"]
+
+    fake = types.ModuleType("cognee")
+    fake.add, fake.cognify, fake.search = add, cognify, search
+    fake.SearchType = types.SimpleNamespace(GRAPH_COMPLETION="GRAPH_COMPLETION")
+    monkeypatch.setitem(sys.modules, "cognee", fake)
+
+    adapter = CogneeAdapter()
+    adapter.add("visit 1", "merchant_1")
+    adapter.add("visit 2", "merchant_1")
+    with ThreadPoolExecutor(max_workers=2) as pool:  # searches come from the get_context pool threads
+        answers = list(pool.map(lambda d: adapter.search("q", d), ["merchant_1", "merchant_2"]))
+    assert answers == ["answer for merchant_1", "answer for merchant_2"]

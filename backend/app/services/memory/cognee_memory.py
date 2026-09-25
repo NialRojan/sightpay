@@ -60,6 +60,25 @@ def _import_cognee():
     return cognee
 
 
+_loop: asyncio.AbstractEventLoop | None = None
+_loop_lock = threading.Lock()
+
+
+def _run_on_cognee_loop(coro):
+    """Run a coroutine on one long-lived event loop and wait for its result.
+
+    Cognee caches asyncio locks and async engines bound to the first loop it runs on, so a fresh asyncio.run() per
+    call fails from the second call on ("... is bound to a different event loop"). Every Cognee call therefore runs
+    on this single background loop, whichever thread (request, pool worker, background add) asks for it.
+    """
+    global _loop
+    with _loop_lock:
+        if _loop is None or _loop.is_closed():
+            _loop = asyncio.new_event_loop()
+            threading.Thread(target=_loop.run_forever, daemon=True, name="cognee-loop").start()
+    return asyncio.run_coroutine_threadsafe(coro, _loop).result()
+
+
 class CogneeAdapter:
     """The only place that touches the cognee library (API checked against cognee 1.6.1)."""
 
@@ -70,7 +89,7 @@ class CogneeAdapter:
             await cognee.add(text, dataset_name=dataset)
             await cognee.cognify(datasets=[dataset])
 
-        asyncio.run(_run())
+        _run_on_cognee_loop(_run())
 
     def search(self, query: str, dataset: str) -> str:
         cognee = _import_cognee()
@@ -79,7 +98,7 @@ class CogneeAdapter:
         async def _run():
             return await cognee.search(query_text=query, query_type=SearchType.GRAPH_COMPLETION, datasets=[dataset])
 
-        return flatten_search_results(asyncio.run(_run()))
+        return flatten_search_results(_run_on_cognee_loop(_run()))
 
 
 def visit_memory_document(visit: models.Visit) -> str:
