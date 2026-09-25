@@ -103,5 +103,6 @@ def test_trend_skips_the_intervention_of_the_visit_being_analyzed(db):
 
     during_run = get_memory().get_context(db, ramesh.id, exclude_visit_id=visit.id)
     assert 12 < during_run.transaction_trend_pct < 24
-    # Without the exclusion the latest intervention is today's: no post data, so no trend (never extrapolated).
-    assert get_memory().get_context(db, ramesh.id).transaction_trend_pct is None
+    # Without the exclusion today's intervention is the latest but has no post data yet, so the previous measurable
+    # one is used instead (never an extrapolated value for today's).
+    assert get_memory().get_context(db, ramesh.id).transaction_trend_pct == during_run.transaction_trend_pct

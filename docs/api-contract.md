@@ -230,10 +230,11 @@ Same photo submitted again as a fresh visit (fraud, duplicate image) yields `sta
 
 - `GET /merchants` → `[{id, name, owner_name, language, lat, lng, category, assigned_fse_name, latest_score, latest_decision, last_visit_at}]`
 - `GET /merchants/{id}` → `{merchant, context (memory: previous_scores, previous_issues, previous_interventions, consecutive_non_compliant, transaction_trend_pct, summary, source sql|cognee|sql_fallback), recent_visits[], interventions[], open_escalations[]}`
-  `context.transaction_trend_pct` is the **observed** % change in daily transactions around the merchant's latest
-  intervention (see [Impact](#impact-observed-change--never-label-as-causal-uplift)). It is `null` unless that result has
-  `status: "ok"`: a fresh intervention (fewer than 3 days of data after it) gives `null`, never an extrapolated value.
-  While a visit is being analyzed, the intervention that visit itself created is ignored. When set, `summary` ends with
+  `context.transaction_trend_pct` is the **observed** % change in daily transactions around the merchant's most recent
+  **measurable** intervention (see [Impact](#impact-observed-change--never-label-as-causal-uplift)): a fresh intervention
+  (fewer than 3 days of data after it) is skipped in favour of the previous one with `status: "ok"`. It is `null` only
+  when none of the merchant's recent interventions is measurable, never an extrapolated value. While a visit is being
+  analyzed, the intervention that visit itself created is ignored. When set, `summary` ends with
   `observed transaction change +x%`. Show it as "Observed change", never as uplift caused by the fix.
 - `GET /merchants/{id}/impact?intervention_id=` → see [Impact](#impact-observed-change--never-label-as-causal-uplift)
 
@@ -279,21 +280,28 @@ decimals, percentages to 1.
 
 - `GET /merchants/{id}/impact?intervention_id=` → `{merchant_id, merchant_name, label, caveat,
   intervention {id, action, issue, date, visit_id, message_text} | null,
+  newer_intervention_pending {id, action, issue, date, visit_id} | null,
   impact {intervention_date, baseline_start, baseline_end, post_start, post_end, baseline_days, post_days,
   baseline_avg_daily_inr, post_avg_daily_inr, change_inr, change_pct, baseline_avg_txn_count, post_avg_txn_count,
   status ok|insufficient_data, label, caveat} | null, series [{date, amount_inr, txn_count, phase baseline|intervention|post}]}`
-  Without `intervention_id` it uses the merchant's latest intervention. A merchant with no intervention gets
-  `intervention: null, impact: null, series: []` (200). `series` covers the baseline start to the post end, oldest first.
+  Without `intervention_id` it measures the merchant's most recent **measurable** intervention (`status: "ok"`, looking
+  back at most 5 interventions, newest first); `intervention` is always the one actually measured. If a newer
+  intervention is still collecting post data, it is returned in `newer_intervention_pending` (UI: "New guidance sent
+  <date>, still collecting data"); otherwise that field is `null`. If no recent intervention is measurable, the latest
+  one is shown with `status: "insufficient_data"` and `newer_intervention_pending: null`. With `intervention_id` exactly
+  that intervention is measured (possibly `insufficient_data`) and `newer_intervention_pending` is `null`. A merchant
+  with no intervention gets `intervention: null, newer_intervention_pending: null, impact: null, series: []` (200). `series` covers the baseline start to the post end, oldest first.
   errors: 404 unknown merchant (`"Merchant not found"`) · 404 `intervention_id` unknown or belonging to another merchant
   (`"Intervention not found for this merchant"`)
 - `GET /analytics/impact` → `{label, caveat, merchants_measured, overall_avg_change_pct,
   by_action {action: {label, merchants, avg_change_pct}}, merchants [{merchant_id, merchant_name, action, intervention_date, change_pct}]}`
-  Uses each merchant's latest intervention; only `ok` results count. `merchants` is sorted by `change_pct`, highest first.
+  Uses each merchant's most recent measurable intervention (same rule as above); merchants with none are left out. `merchants` is sorted by `change_pct`, highest first.
   `overall_avg_change_pct` is `null` when no merchant is measurable (`by_action` is then `{}`).
 
 Note: a new non-compliant visit creates a new intervention, which becomes the merchant's latest. Until it has 3 days of
-post data, `GET /merchants/{id}/impact` returns `insufficient_data` for it; pass the earlier `intervention_id` (from
-`GET /merchants/{id}` → `interventions[]`) to keep showing the previous before/after chart.
+post data it is not measurable, so the impact endpoint, `context.transaction_trend_pct` and `GET /analytics/impact` keep
+using the previous measurable intervention, and the endpoint flags the new one in `newer_intervention_pending`. Pass its
+`intervention_id` to see its own (`insufficient_data`) window.
 
 #### Example: `GET /merchants/1/impact` (series trimmed)
 
@@ -302,6 +310,7 @@ post data, `GET /merchants/{id}/impact` returns `insufficient_data` for it; pass
   "merchant_id": 1, "merchant_name": "Ramesh General Store", "label": "observed_change",
   "caveat": "Observed change around the intervention date. This is not proof that the intervention caused it: seasonality, festivals and other factors also move sales.",
   "intervention": {"id": 2, "action": "clear_qr_obstruction", "issue": "QR obstruction", "date": "2026-09-05", "visit_id": 2, "message_text": "Guidance sent: QR obstruction"},
+  "newer_intervention_pending": null,
   "impact": {
     "intervention_date": "2026-09-05", "baseline_start": "2026-08-22", "baseline_end": "2026-09-04",
     "post_start": "2026-09-06", "post_end": "2026-09-19", "baseline_days": 14, "post_days": 14,
@@ -318,9 +327,12 @@ post data, `GET /merchants/{id}/impact` returns `insufficient_data` for it; pass
 }
 ```
 
-The same merchant right after a new non-compliant visit today (its fresh intervention has no post data yet):
+The same merchant right after a new non-compliant visit today: `intervention` and `impact` are unchanged (still the
+2026-09-05 intervention, `change_pct: 17.5`), and the fresh intervention is flagged:
+`"newer_intervention_pending": {"id": 53, "action": "clear_qr_obstruction", "issue": "QR obstruction", "date": "2026-09-25", "visit_id": 54}`.
+`GET /merchants/1/impact?intervention_id=53` shows that fresh one on its own:
 `"impact": {..., "baseline_days": 14, "post_days": 0, "baseline_avg_daily_inr": 4953.24, "post_avg_daily_inr": null,
-"change_inr": null, "change_pct": null, "status": "insufficient_data", ...}`.
+"change_inr": null, "change_pct": null, "status": "insufficient_data", ...}`, `"newer_intervention_pending": null`.
 
 #### Example: `GET /analytics/impact` (merchants trimmed)
 
@@ -346,7 +358,8 @@ The same merchant right after a new non-compliant visit today (its fresh interve
 
 - `GET /dashboard` → `{kpis{visits_today, visits_7d, compliance_rate_7d, avg_qr_score_7d, avg_authenticity_7d, blocked_7d, open_escalations, incentives_inr_7d, whatsapp_sent_7d, avg_observed_change_pct}, decision_breakdown_7d, recent_visits[], fse_leaderboard[]}`
   `avg_observed_change_pct` = `overall_avg_change_pct` from `GET /analytics/impact` (the average **observed** change over
-  merchants whose latest intervention is measurable); `null` when none is. Label it "Avg observed change".
+  each merchant's most recent measurable intervention, so a fresh visit does not drop a merchant from it); `null` when
+  no merchant has one. Label it "Avg observed change".
 - `GET /escalations?status=open` → `[{id, visit_id, merchant_name, fse_name, reason, status, photo_url, authenticity_score, qr_visibility_score, confidence, ...}]`
 - `POST /escalations/{id}/approve` · `POST /escalations/{id}/reject` body `{resolved_by, note?}` → escalation · 409 if already resolved
 
@@ -367,7 +380,7 @@ Approval semantics:
   "kpis": {
     "visits_today": 5, "visits_7d": 5, "compliance_rate_7d": 50.0, "avg_qr_score_7d": 44.0,
     "avg_authenticity_7d": 77.8, "blocked_7d": 1, "open_escalations": 2, "incentives_inr_7d": 50, "whatsapp_sent_7d": 1,
-    "avg_observed_change_pct": 0.8
+    "avg_observed_change_pct": 1.6
   },
   "decision_breakdown_7d": {"low_confidence": 2, "compliant": 1, "non_compliant": 1, "fraud": 1},
   "recent_visits": [

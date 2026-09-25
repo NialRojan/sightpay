@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
-from app.services.impact import intervention_impact
+from app.services.impact import measurable_impact
 from app.services.labels import ACTION_LABELS
 from app.services.memory.base import MerchantContext
 
@@ -56,14 +56,12 @@ class SqlMemory:
             consecutive_non_compliant=streak,
             last_visit_at=visits[0].received_at if visits else None,
         )
-        # Observed change around the latest intervention, excluding the one the visit being analyzed made (on a
-        # re-run it already exists but has no post window yet). Visits have at most one intervention, so the
-        # latest other one is within these 5. Only an "ok" result is used: never extrapolated.
-        latest = next((i for i in interventions if exclude_visit_id is None or i.visit_id != exclude_visit_id), None)
-        if latest is not None:
-            impact = intervention_impact(db, latest)
-            if impact.status == "ok":
-                ctx.transaction_trend_pct = impact.change_pct
+        # Observed change around the most recent *measurable* intervention: a fresh one (no post window yet, e.g. the
+        # one a visit made today) is skipped in favour of the previous measurable one. The intervention made by the
+        # visit being analyzed is ignored. Only an "ok" result is used: never extrapolated.
+        measured = measurable_impact(db, merchant_id, exclude_visit_id)
+        if measured is not None:
+            ctx.transaction_trend_pct = measured[1].change_pct
         ctx.summary = summarize(ctx)
         return ctx
 
