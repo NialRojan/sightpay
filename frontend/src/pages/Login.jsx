@@ -1,44 +1,52 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowRight,
   Check,
-  Footprints,
   LayoutGrid,
   Languages,
   Lock,
+  MapPin,
   ShieldCheck,
   Smartphone,
+  UserRound,
   Wallet,
 } from 'lucide-react'
-import { merchants } from '../data/demoData'
+import { listFse } from '../services/fse'
+import { listMerchants, getMerchantDetail } from '../services/merchants'
+import { getPortfolioImpact } from '../services/analytics'
+import {
+  getCurrentFse,
+  getManagerName,
+  getRole,
+  setCurrentFse,
+  setManagerName,
+  setRole,
+} from '../services/session'
+import { DECISION_LABEL, fmtPct } from '../services/format'
 
 const WORKSPACES = [
   {
-    id: 'fse_mobile',
+    id: 'fse',
     icon: Smartphone,
-    tag: 'FSE Mobile App',
-    title: 'FSE Mobile Copilot (Mobile App)',
-    text: 'Dedicated mobile experience for Field Sales Executives: Visit Queue, Geofence, Vision AI Capture & Sarvam Voice Guidance.',
-    cta: 'Launch FSE Mobile App',
-    to: '/fse/mobile',
+    tag: 'Field rep',
+    title: 'Field Sales Executive',
+    text: 'Pick your name to open your priority queue, merchant 360, visit evidence and the FSE mobile copilot.',
+    cta: 'Continue as field rep',
+    to: '/fse',
   },
   {
-    id: 'mgr',
+    id: 'manager',
     icon: LayoutGrid,
-    tag: 'Admin / Manager',
+    tag: 'Manager',
     title: 'Admin / Manager Panel',
-    text: 'Central operational control: Operations Dashboard, AI Priority Queue, Merchant 360, Visit Audit, Manager Command Center, and Impact Analytics.',
-    cta: 'Enter Admin / Manager Panel',
-    to: '/fse',
+    text: 'Review escalations, flagged visits, team coverage and impact analytics. Your name is recorded as the approver.',
+    cta: 'Enter Manager Command Center',
+    to: '/manager',
   },
 ]
 
-const FACTS = [
-  ['100 m', 'GPS check radius'],
-  ['75+', 'Score that auto-pays'],
-  ['+19%', 'Observed uplift'],
-]
+const LANG_NAME = { 'hi-IN': 'Hindi', 'mr-IN': 'Marathi', 'ta-IN': 'Tamil', 'en-IN': 'English', 'gu-IN': 'Gujarati' }
 
 function Logo() {
   return (
@@ -56,14 +64,68 @@ function Logo() {
 
 export default function Login() {
   const nav = useNavigate()
-  const [sel, setSel] = useState('fse_mobile')
+  const [params] = useSearchParams()
+  const initialRole = params.get('role') === 'manager' || params.get('role') === 'fse' ? params.get('role') : getRole()
+  const [sel, setSel] = useState(initialRole === 'manager' ? 'manager' : 'fse')
   const [ready, setReady] = useState(false)
 
-  const m = merchants?.[0] ?? {}
-  const score = Math.max(0, Math.min(100, Number(m.qr) || 60))
-  const pri = String(m.pri ?? 'normal')
-  const isHigh = /high|urgent|critical/i.test(pri)
+  // Reps from GET /fse
+  const [reps, setReps] = useState(null)
+  const [repsError, setRepsError] = useState(null)
+  const [fseId, setFseId] = useState(() => getCurrentFse()?.id ?? null)
+  const [managerName, setManagerNameInput] = useState(() => getManagerName())
+  const [formError, setFormError] = useState('')
+
+  // Hero card: the lowest-scoring merchant + portfolio observed change (real data)
+  const [hero, setHero] = useState(null)
+  const [heroError, setHeroError] = useState(null)
+  const [impact, setImpact] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    listFse()
+      .then((rows) => {
+        if (!alive) return
+        setReps(rows)
+        setFseId((cur) => (cur && rows.some((r) => r.id === Number(cur)) ? Number(cur) : rows[0]?.id ?? null))
+      })
+      .catch((e) => alive && setRepsError(e))
+
+    listMerchants()
+      .then(async (rows) => {
+        // the weakest counter with a real audit result (unusable photos score 0 and would skew this)
+        const byScore = (a, b) => a.latest_score - b.latest_score
+        const nonCompliant = rows.filter((m) => m.latest_decision === 'non_compliant' && m.latest_score != null).sort(byScore)
+        const scored = rows.filter((m) => m.latest_score != null).sort(byScore)
+        const pick = nonCompliant[0] || scored[0] || rows[0]
+        if (!pick) return null
+        const detail = await getMerchantDetail(pick.id)
+        return { m: pick, detail }
+      })
+      .then((h) => alive && setHero(h))
+      .catch((e) => alive && setHeroError(e))
+
+    getPortfolioImpact()
+      .then((d) => alive && setImpact(d))
+      .catch(() => alive && setImpact({ overall_avg_change_pct: null }))
+
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const m = hero?.m ?? {}
+  const latest = hero?.detail?.recent_visits?.[0]
+  const score = Math.max(0, Math.min(100, Number(m.latest_score) || 0))
+  const openIssue = ['non_compliant', 'low_confidence'].includes(m.latest_decision)
+  const isHigh = openIssue && score < 60
   const ws = WORKSPACES.find((w) => w.id === sel) || WORKSPACES[0]
+
+  const FACTS = [
+    ['100 m', 'GPS check radius'],
+    ['₹50', 'Per verified compliant visit'],
+    [impact ? fmtPct(impact.overall_avg_change_pct) : '…', 'Avg observed change'],
+  ]
 
   const R = 34
   const C = 2 * Math.PI * R
@@ -77,6 +139,30 @@ export default function Login() {
     const r = e.currentTarget.getBoundingClientRect()
     e.currentTarget.style.setProperty('--mx', `${e.clientX - r.left}px`)
     e.currentTarget.style.setProperty('--my', `${e.clientY - r.top}px`)
+  }
+
+  const submit = (e) => {
+    e.preventDefault()
+    setFormError('')
+    if (sel === 'fse') {
+      const rep = reps?.find((r) => r.id === Number(fseId))
+      if (!rep) {
+        setFormError(repsError ? `Cannot load reps: ${repsError.message}` : 'Choose your name first.')
+        return
+      }
+      setRole('fse')
+      setCurrentFse(rep)
+      nav(ws.to)
+    } else {
+      const name = managerName.trim()
+      if (!name) {
+        setFormError('Enter your name: it is recorded as the approver on escalations.')
+        return
+      }
+      setRole('manager')
+      setManagerName(name)
+      nav(ws.to)
+    }
   }
 
   return (
@@ -102,8 +188,8 @@ export default function Login() {
           <div className="lg-vis">
             <div className="lg-card">
               <div className="lg-card-top">
-                <b>{m.name ?? 'Ramesh General Store'}</b>
-                <span className={`lg-tag ${isHigh ? 'high' : ''}`}>{isHigh ? 'High priority' : 'Normal priority'}</span>
+                <b>{m.name ?? (heroError ? 'Merchants unavailable' : 'Loading merchant…')}</b>
+                <span className={`lg-tag ${isHigh ? 'high' : ''}`}>{openIssue ? (isHigh ? 'High priority' : 'Open issue') : 'Normal priority'}</span>
               </div>
 
               <div className="lg-card-main">
@@ -114,22 +200,27 @@ export default function Login() {
                     strokeDasharray={C} strokeDashoffset={ready ? C * (1 - score / 100) : C}
                     transform="rotate(-90 42 42)" className="lg-ring-fill"
                   />
-                  <text x="42" y="47" textAnchor="middle" className="lg-ring-n">{score}</text>
+                  <text x="42" y="47" textAnchor="middle" className="lg-ring-n">{m.latest_score ?? '—'}</text>
                 </svg>
 
                 <dl>
-                  <div><dt>AI priority</dt><dd>{pri.charAt(0).toUpperCase() + pri.slice(1)}</dd></div>
-                  <div><dt>QR visibility</dt><dd>{score}/100</dd></div>
-                  <div><dt>Competitor</dt><dd>{m.competitor ?? 'PhonePe'}</dd></div>
+                  <div><dt>Last decision</dt><dd>{DECISION_LABEL[m.latest_decision] ?? '—'}</dd></div>
+                  <div><dt>QR visibility</dt><dd>{m.latest_score != null ? `${m.latest_score}/100` : '—'}</dd></div>
+                  <div><dt>Assigned rep</dt><dd>{m.assigned_fse_name ?? '—'}</dd></div>
                 </dl>
               </div>
 
-              <div className="lg-verified"><ShieldCheck size={14} /> Visit verified (Multi-signal 94/100)</div>
+              <div className="lg-verified">
+                <ShieldCheck size={14} />
+                {latest?.authenticity_score != null
+                  ? `Last visit: combined evidence signals ${latest.authenticity_score}/100`
+                  : heroError ? heroError.message : 'Combined evidence signals'}
+              </div>
             </div>
 
-            <div className="lg-pill p1"><span><ShieldCheck size={13} /></span>Geofence verified (43m)</div>
-            <div className="lg-pill p2"><span><Languages size={13} /></span>Hindi Sarvam guidance ready</div>
-            <div className="lg-pill p3 blur"><span><Wallet size={13} /></span>Incentive ₹50 eligible</div>
+            <div className="lg-pill p1"><span><MapPin size={13} /></span>{m.address || m.category || 'GPS check within 100 m'}</div>
+            <div className="lg-pill p2"><span><Languages size={13} /></span>Guidance in {LANG_NAME[m.language] || m.language || '—'}</div>
+            <div className="lg-pill p3 blur"><span><Wallet size={13} /></span>Compliant visits earn ₹50</div>
           </div>
 
           <div className="lg-facts">
@@ -140,21 +231,15 @@ export default function Login() {
         </div>
       </section>
 
-      {/* RIGHT: workspace selection */}
+      {/* RIGHT: role selection */}
       <section className="lg-form">
         <button type="button" className="lg-back" onClick={() => nav('/')}>Back to home</button>
 
-        <form
-          className="lg-box"
-          onSubmit={(e) => {
-            e.preventDefault()
-            nav(ws.to)
-          }}
-        >
+        <form className="lg-box" onSubmit={submit}>
           <h2>Welcome to SightPay</h2>
-          <p className="lg-sub">Select your operational workspace to proceed.</p>
+          <p className="lg-sub">Choose your role to proceed.</p>
 
-          <div className="lg-ws" role="radiogroup" aria-label="Workspace">
+          <div className="lg-ws" role="radiogroup" aria-label="Role">
             {WORKSPACES.map(({ id, icon: Icon, tag, title, text }) => {
               const on = sel === id
               return (
@@ -177,6 +262,52 @@ export default function Login() {
               )
             })}
           </div>
+
+          {sel === 'fse' ? (
+            <div className="lg-field">
+              <span>Who are you?</span>
+              {repsError && <div className="lg-err" role="alert">Cannot load reps: {repsError.message}</div>}
+              {!reps && !repsError && <small className="lg-hint">Loading field reps…</small>}
+              {reps && reps.length === 0 && <small className="lg-hint">No field reps in the backend yet.</small>}
+              {reps && reps.length > 0 && (
+                <div className="lg-ws lg-reps" role="radiogroup" aria-label="Field rep">
+                  {reps.map((r) => {
+                    const on = Number(fseId) === r.id
+                    return (
+                      <button
+                        type="button"
+                        key={r.id}
+                        role="radio"
+                        aria-checked={on}
+                        className={`lg-wcard ${on ? 'on' : ''}`}
+                        onClick={() => setFseId(r.id)}
+                      >
+                        <span className="lg-wico"><UserRound size={18} strokeWidth={1.8} /></span>
+                        <span className="lg-wtxt">
+                          <strong>{r.name}</strong>
+                          <small>FSE-{r.id} · {r.territory || '—'}</small>
+                        </span>
+                        <span className="lg-radio">{on && <Check size={13} strokeWidth={3} />}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <label className="lg-field">
+              <span>Your name (recorded as the approver)</span>
+              <input
+                value={managerName}
+                onChange={(e) => setManagerNameInput(e.target.value)}
+                placeholder="e.g. Priya Kulkarni"
+                autoComplete="name"
+                aria-label="Manager name"
+              />
+            </label>
+          )}
+
+          {formError && <div className="lg-err" role="alert">{formError}</div>}
 
           <button type="submit" className="lg-go">
             {ws.cta} <ArrowRight size={16} />
@@ -263,6 +394,17 @@ const CSS = `
   font:700 15px Inter,sans-serif;background:#1F5BFF;box-shadow:0 12px 28px -10px rgba(31,91,255,0.4);transition:all .2s}
 .lg-go:hover{filter:brightness(1.08);transform:translateY(-1px)}
 .lg-foot{display:flex;align-items:center;justify-content:center;gap:7px;margin-top:20px;font-size:12px;color:var(--ink2)}
+
+/* role details (reuse the workspace-card look) */
+.lg-field{display:grid;gap:8px;margin-top:18px}
+.lg-field > span{font-size:12px;font-weight:600;color:var(--ink2)}
+.lg-field input{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:#FFFFFF;color:var(--ink);font:400 14px Inter,sans-serif;outline:0}
+.lg-field input:focus{border-color:#1F5BFF}
+.lg-reps{margin-top:0;gap:8px}
+.lg-reps .lg-wcard{padding:10px 14px}
+.lg-reps .lg-wico{width:34px;height:34px;border-radius:11px}
+.lg-hint{font-size:12px;color:var(--ink2)}
+.lg-err{margin-top:10px;padding:10px 12px;border-radius:12px;background:#FEE2E2;color:#DC2626;font-size:12.5px}
 
 @media (max-width:900px){
   .lg{grid-template-columns:1fr}

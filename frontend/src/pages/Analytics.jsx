@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   ArrowRight,
   ArrowUpRight,
@@ -15,12 +16,18 @@ import {
 } from 'lucide-react'
 
 import Layout from '../components/Layout'
-import { getImpact } from '../services/analytics'
+import { getDashboard, getPortfolioImpact, getSystemHealth } from '../services/analytics'
+import { getMerchantDetail, getMerchantImpact, listMerchants } from '../services/merchants'
+import { getVisitAudit } from '../services/audits'
+import { listTransactions } from '../services/transactions'
+import { listFse, getFseSummary } from '../services/fse'
+import { ACTION_LABEL, DECISION_LABEL, fmtDate, fmtInr, fmtPct } from '../services/format'
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
 
+// The range drives the "Transaction movement" chart: GET /transactions?merchant_id=&days=
 const RANGE_OPTIONS = [
   { label: 'Last 7 Days', value: 7 },
   { label: 'Last 14 Days', value: 14 },
@@ -32,13 +39,19 @@ const safeValue = (value) =>
     ? '—'
     : value
 
-const numberValue = (value) => {
-  const n = Number(value)
-  return Number.isFinite(n) ? n : null
-}
-
 const clamp = (n, min, max) =>
   Math.max(min, Math.min(max, n))
+
+const errText = (e) => (e ? e.detail || e.message || String(e) : '')
+
+const fmtDay = (d) =>
+  d ? new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : ''
+
+const signedPts = (a, b) => {
+  if (a == null || b == null) return '—'
+  const d = b - a
+  return `${d > 0 ? '+' : d < 0 ? '−' : ''}${Math.abs(d)} pts`
+}
 
 /* -------------------------------------------------------------------------- */
 /* Chart                                                                      */
@@ -50,6 +63,9 @@ function ImpactChart({
   selectedPoint,
   onSelectPoint,
   beforeAfter = false,
+  interventionIndex = null,
+  formatValue = (v) => `${v} / day`,
+  emptyText = 'No measurement data available.',
 }) {
   const series = beforeAfter
     ? values.filter(Array.isArray)
@@ -61,7 +77,7 @@ function ImpactChart({
     return (
       <div className="analytics-empty-chart">
         <LineChartIcon size={22} />
-        <span>No measurement data available.</span>
+        <span>{emptyText}</span>
       </div>
     )
   }
@@ -109,9 +125,11 @@ function ImpactChart({
   }))
 
   const interventionX =
-    beforeAfter && observedSeries.length > 1
-      ? width / 2
-      : null
+    interventionIndex !== null && observedSeries.length > 1
+      ? getX(interventionIndex, observedSeries.length)
+      : beforeAfter && observedSeries.length > 1
+        ? width / 2
+        : null
 
   return (
     <div className="analytics-chart">
@@ -227,7 +245,7 @@ function ImpactChart({
             />
 
             <rect
-              x={interventionX - 51}
+              x={clamp(interventionX - 51, 0, width - 102)}
               y="4"
               width="102"
               height="24"
@@ -236,7 +254,7 @@ function ImpactChart({
             />
 
             <text
-              x={interventionX}
+              x={clamp(interventionX, 51, width - 51)}
               y="20"
               textAnchor="middle"
               className="analytics-intervention-label"
@@ -329,7 +347,7 @@ function ImpactChart({
                   textAnchor="middle"
                   className="analytics-tooltip-value"
                 >
-                  {point.value} / day
+                  {formatValue(point.value)}
                 </text>
               </g>
             )}
@@ -404,6 +422,7 @@ function ImpactKpi({
 /* Intervention table                                                        */
 /* -------------------------------------------------------------------------- */
 
+// rows: [{key, label, merchants, positive, latest, avg}] built from /analytics/impact by_action + merchants[]
 function InterventionTable({
   rows = [],
   selected,
@@ -424,65 +443,57 @@ function InterventionTable({
     <div className="analytics-table">
       <div className="analytics-table-head">
         <span>INTERVENTION</span>
-        <span>MERCHANTS</span>
-        <span>COMPLETED</span>
-        <span>MEASURED</span>
-        <span>OBSERVED CHANGE</span>
+        <span>MERCHANTS MEASURED</span>
+        <span>POSITIVE CHANGE</span>
+        <span>LATEST</span>
+        <span>AVG OBSERVED CHANGE</span>
       </div>
 
-      {rows.map((row, index) => {
-        const change =
-          row?.[4] ?? '—'
+      {rows.map((row, index) => (
+        <button
+          type="button"
+          key={row.key}
+          className={`analytics-table-row ${
+            selected === index
+              ? 'selected'
+              : ''
+          }`}
+          onClick={() =>
+            onSelect(index)
+          }
+        >
+          <span className="analytics-intervention-name">
+            <i />
+            {safeValue(row.label)}
+          </span>
 
-        const numericChange =
-          parseFloat(change)
+          <span>
+            {safeValue(row.merchants)}
+          </span>
 
-        return (
-          <button
-            type="button"
-            key={`${row?.[0] || 'row'}-${index}`}
-            className={`analytics-table-row ${
-              selected === index
-                ? 'selected'
+          <span>
+            {safeValue(row.positive)}
+          </span>
+
+          <span>
+            {row.latest ? fmtDate(row.latest) : '—'}
+          </span>
+
+          <span
+            className={
+              row.avg > 0
+                ? 'analytics-positive'
                 : ''
-            }`}
-            onClick={() =>
-              onSelect(index)
             }
           >
-            <span className="analytics-intervention-name">
-              <i />
-              {safeValue(row?.[0])}
-            </span>
+            {row.avg > 0 && (
+              <ArrowUpRight size={14} />
+            )}
 
-            <span>
-              {safeValue(row?.[1])}
-            </span>
-
-            <span>
-              {safeValue(row?.[2])}
-            </span>
-
-            <span>
-              {safeValue(row?.[3])}
-            </span>
-
-            <span
-              className={
-                numericChange > 0
-                  ? 'analytics-positive'
-                  : ''
-              }
-            >
-              {numericChange > 0 && (
-                <ArrowUpRight size={14} />
-              )}
-
-              {change}
-            </span>
-          </button>
-        )
-      })}
+            {fmtPct(row.avg)}
+          </span>
+        </button>
+      ))}
     </div>
   )
 }
@@ -491,6 +502,8 @@ function InterventionTable({
 /* Pending measurement drawer                                                */
 /* -------------------------------------------------------------------------- */
 
+// Interventions still collecting post data: GET /merchants/{id}/impact for every merchant
+// (newer_intervention_pending, or a latest intervention with status insufficient_data).
 function PendingDrawer({
   open,
   onClose,
@@ -517,7 +530,8 @@ function PendingDrawer({
 
             <p>
               Interventions waiting for enough
-              transaction observations.
+              transaction observations (at least
+              3 days after the intervention).
             </p>
           </div>
 
@@ -530,23 +544,116 @@ function PendingDrawer({
           </button>
         </div>
 
+        <PendingItems />
+
+        <button
+          className="analytics-primary-button"
+          onClick={onClose}
+        >
+          Close
+        </button>
+      </aside>
+    </>
+  )
+}
+
+function PendingItems() {
+  const [state, setState] = useState({ rows: null, error: null })
+
+  useEffect(() => {
+    let alive = true
+    listMerchants()
+      .then((merchants) =>
+        Promise.all(
+          merchants.map((m) =>
+            getMerchantImpact(m.id).then((r) => ({ m, r })),
+          ),
+        ),
+      )
+      .then((all) => {
+        const rows = []
+        all.forEach(({ m, r }) => {
+          if (r.newer_intervention_pending) {
+            rows.push({ id: m.id, name: m.name, iv: r.newer_intervention_pending, why: 'New guidance, still collecting data' })
+          } else if (r.impact?.status === 'insufficient_data' && r.intervention) {
+            rows.push({
+              id: m.id,
+              name: m.name,
+              iv: r.intervention,
+              why: `Not enough data yet (${r.impact.post_days} days after)`,
+            })
+          }
+        })
+        rows.sort((a, b) => String(b.iv.date).localeCompare(String(a.iv.date)))
+        if (alive) setState({ rows, error: null })
+      })
+      .catch((error) => alive && setState({ rows: null, error }))
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  return (
+    <>
         <div className="analytics-pending-list">
-          <div className="analytics-pending-item">
-            <div className="analytics-pending-icon">
-              <Clock3 size={16} />
+          {state.error && (
+            <div className="analytics-pending-item">
+              <div className="analytics-pending-icon">
+                <Info size={16} />
+              </div>
+              <div>
+                <strong>Could not load the measurement queue</strong>
+                <span>{errText(state.error)}</span>
+              </div>
             </div>
+          )}
 
-            <div>
-              <strong>
-                Measurement window open
-              </strong>
-
-              <span>
-                Outcome data will appear once
-                sufficient observations are available.
-              </span>
+          {!state.rows && !state.error && (
+            <div className="analytics-pending-item">
+              <div className="analytics-pending-icon">
+                <Clock3 size={16} />
+              </div>
+              <div>
+                <strong>Checking every merchant…</strong>
+                <span>Reading each merchant&apos;s latest intervention window.</span>
+              </div>
             </div>
-          </div>
+          )}
+
+          {state.rows && !state.rows.length && (
+            <div className="analytics-pending-item">
+              <div className="analytics-pending-icon">
+                <Clock3 size={16} />
+              </div>
+              <div>
+                <strong>Nothing pending</strong>
+                <span>Every recent intervention already has a measurement window.</span>
+              </div>
+            </div>
+          )}
+
+          {(state.rows || []).map((row) => (
+            <Link
+              key={`${row.id}-${row.iv.id}`}
+              to={`/merchants/${row.id}`}
+              className="analytics-pending-item"
+              style={{ textDecoration: 'none', color: 'inherit' }}
+            >
+              <div className="analytics-pending-icon">
+                <Clock3 size={16} />
+              </div>
+
+              <div>
+                <strong>
+                  {row.name} · {row.iv.issue || ACTION_LABEL[row.iv.action] || row.iv.action}
+                </strong>
+
+                <span>
+                  {row.why} · sent {fmtDate(row.iv.date)}
+                </span>
+              </div>
+            </Link>
+          ))}
 
           <div className="analytics-pending-item">
             <div className="analytics-pending-icon">
@@ -565,14 +672,6 @@ function PendingDrawer({
             </div>
           </div>
         </div>
-
-        <button
-          className="analytics-primary-button"
-          onClick={onClose}
-        >
-          Close
-        </button>
-      </aside>
     </>
   )
 }
@@ -582,11 +681,17 @@ function PendingDrawer({
 /* -------------------------------------------------------------------------- */
 
 export default function Analytics() {
+  // Portfolio: GET /analytics/impact, GET /dashboard, GET /health, rep summaries (conversions)
   const [data, setData] = useState(null)
+  const [loadError, setLoadError] = useState(null)
+  const [reload, setReload] = useState(0)
+
   const [range, setRange] = useState(14)
   const [rangeOpen, setRangeOpen] =
     useState(false)
   const [selectedPoint, setSelectedPoint] =
+    useState(null)
+  const [trendPoint, setTrendPoint] =
     useState(null)
   const [
     selectedIntervention,
@@ -599,112 +704,199 @@ export default function Analytics() {
   const [methodologyOpen, setMethodologyOpen] =
     useState(false)
 
+  // Selected merchant: GET /merchants/{id}/impact + detail + audits + transactions
+  const [merchantId, setMerchantId] = useState(null)
+  const [focusState, setFocusState] = useState({ id: null, value: null, error: null })
+  const [txnState, setTxnState] = useState({ key: null, rows: null, error: null })
+  const focus = focusState.id === merchantId ? focusState.value : null
+  const focusError = focusState.id === merchantId ? focusState.error : null
+  const txnKey = `${merchantId}:${range}`
+  const txns = txnState.key === txnKey ? txnState.rows : null
+  const txnError = txnState.key === txnKey ? txnState.error : null
+
+  const selectMerchant = (id) => {
+    setMerchantId(id)
+    setSelectedPoint(null)
+    setTrendPoint(null)
+  }
+
   useEffect(() => {
     let mounted = true
 
-    getImpact()
-      .then((result) => {
-        if (mounted) setData(result)
+    Promise.all([
+      getPortfolioImpact(),
+      getDashboard(),
+      getSystemHealth().catch((e) => ({ error: e })),
+      listFse()
+        .then((reps) => Promise.all(reps.map((r) => getFseSummary(r.id))))
+        .catch((e) => ({ error: e })),
+    ])
+      .then(([impact, dash, health, summaries]) => {
+        if (!mounted) return
+        setData({ impact, dash, health, summaries })
+        setLoadError(null)
+        setMerchantId((cur) => cur ?? impact.merchants?.[0]?.merchant_id ?? null)
       })
-      .catch(() => {
-        if (mounted) setData({})
+      .catch((e) => {
+        if (mounted) setLoadError(e)
       })
 
     return () => {
       mounted = false
     }
-  }, [])
+  }, [reload])
+
+  useEffect(() => {
+    if (!merchantId) return undefined
+    let alive = true
+    ;(async () => {
+      const [imp, detail] = await Promise.all([
+        getMerchantImpact(merchantId),
+        getMerchantDetail(merchantId),
+      ])
+      const ivVisitId = imp.intervention?.visit_id
+      const beforeVisit = detail.recent_visits?.find((v) => v.id === ivVisitId) || null
+      // newest usable audit after the intervention visit (skip rejected / unusable / in-flight visits)
+      const afterVisit =
+        detail.recent_visits?.find(
+          (v) =>
+            v.id !== ivVisitId &&
+            v.status === 'completed' &&
+            ['compliant', 'non_compliant'].includes(v.decision) &&
+            (!beforeVisit || String(v.received_at) > String(beforeVisit.received_at)),
+        ) || null
+      const audit = (id) => (id ? getVisitAudit(id).catch(() => null) : Promise.resolve(null))
+      const [auditBefore, auditAfter] = await Promise.all([audit(ivVisitId), audit(afterVisit?.id)])
+      return { imp, detail, beforeVisit, afterVisit, auditBefore, auditAfter }
+    })()
+      .then((f) => alive && setFocusState({ id: merchantId, value: f, error: null }))
+      .catch((e) => alive && setFocusState({ id: merchantId, value: null, error: e }))
+    return () => {
+      alive = false
+    }
+  }, [merchantId])
+
+  useEffect(() => {
+    if (!merchantId) return undefined
+    let alive = true
+    const key = `${merchantId}:${range}`
+    listTransactions(merchantId, range)
+      .then((rows) => alive && setTxnState({ key, rows, error: null }))
+      .catch((e) => alive && setTxnState({ key, rows: null, error: e }))
+    return () => {
+      alive = false
+    }
+  }, [merchantId, range])
 
   const rangeLabel =
     RANGE_OPTIONS.find(
       (item) => item.value === range,
     )?.label || 'Last 14 Days'
 
-  const filteredTrend = useMemo(() => {
-    if (!Array.isArray(data?.trend)) {
-      return []
-    }
+  const impact = data?.impact
+  const dash = data?.dash
+  const k = dash?.kpis || {}
+  const health = data?.health?.error ? null : data?.health
+  const summaries = Array.isArray(data?.summaries) ? data.summaries : null
+  const caveat = focus?.imp?.caveat || impact?.caveat
 
-    if (range === 7) {
-      return data.trend.slice(-7)
-    }
+  const merchantsList = useMemo(() => impact?.merchants || [], [impact])
+  const positiveCount = merchantsList.filter((m) => m.change_pct > 0).length
+  const conversions = summaries ? summaries.reduce((s, x) => s + (x.performance?.conversions || 0), 0) : null
 
-    if (range === 30) {
-      return data.trend
-    }
-
-    return data.trend.slice(-14)
-  }, [data, range])
-
-  const trendLabels = useMemo(() => {
-    if (!filteredTrend.length) return []
-
-    return filteredTrend.map(
-      (_, index) => {
-        const total =
-          filteredTrend.length
-
-        if (index === 0)
-          return 'Start'
-
-        if (
-          index ===
-          total - 1
-        ) {
-          return 'Current'
-        }
-
-        if (total <= 7) {
-          return `D${index + 1}`
-        }
-
-        return ''
-      },
-    )
-  }, [filteredTrend])
-
-  const kpis = data?.kpis || []
-  const interventions =
-    data?.interventions || []
+  // by_action rows (+ derived positive count / latest date from merchants[])
+  const interventions = useMemo(
+    () =>
+      Object.entries(impact?.by_action || {})
+        .map(([key, a]) => {
+          const ms = merchantsList.filter((m) => m.action === key)
+          return {
+            key,
+            label: a.label || ACTION_LABEL[key] || key,
+            merchants: a.merchants,
+            positive: ms.filter((m) => m.change_pct > 0).length,
+            latest: ms.map((m) => m.intervention_date).sort().pop() || null,
+            avg: a.avg_change_pct,
+          }
+        })
+        .sort((a, b) => (b.avg ?? -Infinity) - (a.avg ?? -Infinity)),
+    [impact, merchantsList],
+  )
 
   const selectedInterventionData =
     interventions[
       selectedIntervention
     ]
 
-  const beforeAfter =
-    data?.beforeAfter || {}
+  // Before / after series for the selected merchant
+  const series = useMemo(() => focus?.imp?.series || [], [focus])
+  const mImpact = focus?.imp?.impact
+  const observed = series.map((p) => p.amount_inr)
+  const baseline = mImpact?.baseline_avg_daily_inr != null ? series.map(() => mImpact.baseline_avg_daily_inr) : []
+  const ivIndex = useMemo(() => {
+    const i = series.findIndex((p) => p.phase === 'intervention')
+    if (i >= 0) return i
+    const j = series.findIndex((p) => p.phase === 'post')
+    return j >= 0 ? j : null
+  }, [series])
+  const beforeAfterLabels = series.map((p, i) =>
+    i === 0 || i === series.length - 1 || i === ivIndex ? fmtDay(p.date) : '',
+  )
+  const pointLabels = series.map((p) => `${fmtDay(p.date)} · ${p.phase}`)
 
-  const baseline =
-    beforeAfter.baseline || []
+  const trendValues = (txns || []).map((t) => t.amount_inr)
+  const trendLabels = useMemo(() => {
+    const rows = txns || []
+    return rows.map((row, index) => {
+      if (index === 0) return 'Start'
+      if (index === rows.length - 1) return 'Current'
+      if (rows.length <= 7) return fmtDay(row.txn_date)
+      return ''
+    })
+  }, [txns])
 
-  const observed =
-    beforeAfter.observed || []
+  const merchant = focus?.detail?.merchant || {}
+  const ivIssue = focus?.imp?.intervention?.issue || ACTION_LABEL[focus?.imp?.intervention?.action]
+  const statusBadge = !focus
+    ? 'Loading'
+    : !focus.imp.intervention
+      ? 'No intervention yet'
+      : mImpact?.status === 'ok'
+        ? 'Measured'
+        : 'Not enough data yet'
 
-  const baselineStart =
-    numberValue(
-      baseline[0],
-    )
+  const best = interventions[0]
+  const insight = impact
+    ? best
+      ? `${best.label} shows the highest average observed change (${fmtPct(best.avg)}) across ${best.merchants} merchant${best.merchants === 1 ? '' : 's'}; ${positiveCount} of ${impact.merchants_measured} measured merchants show a positive observed change.`
+      : 'No merchant has a measurable intervention yet.'
+    : null
 
-  const observedEnd =
-    numberValue(
-      observed[observed.length - 1],
-    )
+  const opsKpis = [
+    ['Visits today', k.visits_today, 'GET /dashboard', CheckCircle2],
+    ['Visits (7d)', k.visits_7d, 'All reps', CheckCircle2],
+    ['Compliance rate (7d)', k.compliance_rate_7d == null ? null : `${k.compliance_rate_7d}%`, 'Compliant of decided visits', Target],
+    ['Avg authenticity (7d)', k.avg_authenticity_7d, 'Combined evidence signals', Target],
+    ['Blocked visits (7d)', k.blocked_7d, 'Failed authenticity', BarChart3],
+    ['Open escalations', k.open_escalations, 'Waiting for a manager', Clock3],
+    ['Incentives (7d)', k.incentives_inr_7d == null ? null : fmtInr(k.incentives_inr_7d), '₹50 per verified compliant visit', CheckCircle2],
+    ['WhatsApp sent (7d)', k.whatsapp_sent_7d, 'Merchant guidance messages', ArrowUpRight],
+    ['Avg observed change', fmtPct(k.avg_observed_change_pct), 'Same as portfolio impact', TrendingUp],
+    ['Avg QR score (7d)', k.avg_qr_score_7d, 'Vision audit, 0-100', BarChart3],
+  ]
 
-  const calculatedChange =
-    baselineStart !== null &&
-    observedEnd !== null &&
-    baselineStart !== 0
-      ? `${(
-          ((observedEnd -
-            baselineStart) /
-            baselineStart) *
-          100
-        ).toFixed(0)}%`
-      : '—'
-
-  const merchant =
-    data?.merchant || {}
+  const healthTiles = health
+    ? [
+        ['Vision provider', health.vision_provider, health.vision_provider === 'fixture' ? 'Fixture audits (demo)' : 'Live vision model'],
+        ['Anthropic key', health.anthropic_key ? 'Present' : 'Not set', 'Needed for Claude vision'],
+        ['Memory backend', health.memory, health.memory === 'cognee' ? 'Cognee graph, SQL fallback' : 'SQL merchant memory'],
+        ['WhatsApp mode', health.whatsapp, health.whatsapp === 'twilio' ? 'Sent through Twilio' : 'Logged, not sent'],
+        ['n8n', health.n8n ? 'Configured' : 'Off', health.n8n ? 'Pipeline runs through n8n' : 'Pipeline runs inline'],
+        ['API status', health.status, 'GET /api/health'],
+        ['Sarvam key', 'Not reported', '/api/health has no Sarvam field'],
+        ['Dashboard generated', dash?.generated_at ? fmtDate(dash.generated_at) : '—', 'GET /dashboard'],
+      ]
+    : []
 
   if (!data) {
     return (
@@ -723,13 +915,27 @@ export default function Analytics() {
               </span>
 
               <h2>
-                Preparing impact intelligence
+                {loadError ? 'Impact analytics unavailable' : 'Preparing impact intelligence'}
               </h2>
 
               <p>
-                Loading intervention outcomes
-                and transaction measurements.
+                {loadError
+                  ? errText(loadError)
+                  : 'Loading intervention outcomes and transaction measurements.'}
               </p>
+
+              {loadError && (
+                <button
+                  className="analytics-secondary-button"
+                  style={{ marginTop: 12 }}
+                  onClick={() => {
+                    setLoadError(null)
+                    setReload((n) => n + 1)
+                  }}
+                >
+                  Retry
+                </button>
+              )}
             </div>
           </div>
 
@@ -776,6 +982,7 @@ export default function Analytics() {
             <div className="analytics-range">
               <button
                 className="analytics-secondary-button"
+                title="Window of the Transaction movement chart"
                 onClick={() =>
                   setRangeOpen(
                     (value) =>
@@ -811,7 +1018,7 @@ export default function Analytics() {
                           setRangeOpen(
                             false,
                           )
-                          setSelectedPoint(
+                          setTrendPoint(
                             null,
                           )
                         }}
@@ -869,14 +1076,13 @@ export default function Analytics() {
               </h3>
 
               <p>
-                SightPay compares merchant
-                transaction behavior before and
-                after a recorded intervention.
-                The resulting movement is shown
-                as an observed post-intervention
-                change and should not be interpreted
-                as proof that the intervention caused
-                the change.
+                SightPay compares a merchant&apos;s average
+                daily transactions in the 14 days before a
+                recorded intervention with up to 14 days
+                after it (the intervention day itself is
+                excluded). Either window needs at least 3
+                days of data, otherwise the change is not
+                reported. {caveat}
               </p>
             </div>
 
@@ -899,9 +1105,9 @@ export default function Analytics() {
 
         <section className="analytics-kpis">
           <ImpactKpi
-            label="Successful interventions"
-            value={kpis[0]?.[1]}
-            detail="Completed field actions"
+            label="Positive observed change"
+            value={`${positiveCount}`}
+            detail={`Of ${impact.merchants_measured} measured merchants`}
             icon={CheckCircle2}
             active={
               selectedKpi ===
@@ -916,8 +1122,8 @@ export default function Analytics() {
 
           <ImpactKpi
             label="Observed transaction change"
-            value={kpis[1]?.[1]}
-            detail="Measured merchants"
+            value={fmtPct(impact.overall_avg_change_pct)}
+            detail="Avg across measured merchants"
             icon={TrendingUp}
             active={
               selectedKpi === 'change'
@@ -930,9 +1136,9 @@ export default function Analytics() {
           />
 
           <ImpactKpi
-            label="QR visibility improvement"
-            value={kpis[2]?.[1]}
-            detail="Across measured visits"
+            label="Avg QR visibility (7d)"
+            value={k.avg_qr_score_7d}
+            detail="Vision audit score, 0-100"
             icon={BarChart3}
             active={
               selectedKpi ===
@@ -947,8 +1153,8 @@ export default function Analytics() {
 
           <ImpactKpi
             label="Merchants recovered"
-            value={kpis[3]?.[1]}
-            detail="Returned to healthier state"
+            value={conversions}
+            detail="Non-compliant → compliant (30d)"
             icon={Target}
             active={
               selectedKpi ===
@@ -962,9 +1168,9 @@ export default function Analytics() {
           />
 
           <ImpactKpi
-            label="Visits measured"
-            value={kpis[4]?.[1]}
-            detail="With outcome data"
+            label="Merchants measured"
+            value={impact.merchants_measured}
+            detail="With a measurable intervention"
             icon={CheckCircle2}
             active={
               selectedKpi ===
@@ -999,14 +1205,14 @@ export default function Analytics() {
                 )}
                 {merchant.name &&
                   ' · '}
-                transactions per day
+                transaction value per day (₹)
               </p>
             </div>
 
             <div className="analytics-legend">
               <span>
                 <i className="baseline" />
-                Baseline
+                Baseline avg
               </span>
 
               <span>
@@ -1020,9 +1226,8 @@ export default function Analytics() {
             <div>
               <span>Baseline</span>
               <strong>
-                {baselineStart !==
-                null
-                  ? `${baselineStart}/day`
+                {mImpact?.baseline_avg_daily_inr != null
+                  ? `${fmtInr(mImpact.baseline_avg_daily_inr)}/day`
                   : '—'}
               </strong>
             </div>
@@ -1032,9 +1237,8 @@ export default function Analytics() {
             <div>
               <span>Intervention</span>
               <strong>
-                {safeValue(
-                  data?.intervention,
-                )}
+                {safeValue(ivIssue)}
+                {focus?.imp?.intervention?.date ? ` · ${fmtDate(focus.imp.intervention.date)}` : ''}
               </strong>
             </div>
 
@@ -1044,16 +1248,15 @@ export default function Analytics() {
               <span>Observed</span>
 
               <strong>
-                {observedEnd !==
-                null
-                  ? `${observedEnd}/day`
-                  : '—'}
+                {mImpact?.post_avg_daily_inr != null
+                  ? `${fmtInr(mImpact.post_avg_daily_inr)}/day`
+                  : mImpact
+                    ? `Not enough data yet (${mImpact.post_days} days after)`
+                    : '—'}
               </strong>
 
               <b>
-                {safeValue(
-                  calculatedChange,
-                )}
+                {fmtPct(mImpact?.change_pct)}
               </b>
             </div>
           </div>
@@ -1064,22 +1267,47 @@ export default function Analytics() {
               observed,
             ]}
             beforeAfter
+            interventionIndex={ivIndex}
             labels={
-              beforeAfter.labels ||
-              []
+              series.length ? beforeAfterLabels : []
             }
             selectedPoint={
               selectedPoint
             }
             onSelectPoint={
-              setSelectedPoint
+              (i) => setSelectedPoint(i)
+            }
+            formatValue={(v) => fmtInr(v)}
+            emptyText={
+              focusError
+                ? `Could not load this merchant's impact: ${errText(focusError)}`
+                : !merchantId
+                  ? 'No merchant has a measurable intervention yet.'
+                  : !focus
+                    ? 'Loading measurement…'
+                    : 'No guidance sent to this merchant yet.'
             }
           />
 
-          <div className="analytics-chart-note">
+          {selectedPoint !== null && series[selectedPoint] && (
+            <div className="analytics-chart-note">
+              <Info size={13} />
+              {pointLabels[selectedPoint]}: {fmtInr(series[selectedPoint].amount_inr)} ·{' '}
+              {series[selectedPoint].txn_count} transactions
+            </div>
+          )}
+
+          {focus?.imp?.newer_intervention_pending && (
+            <div className="analytics-chart-note">
+              <Clock3 size={13} />
+              New guidance sent {fmtDate(focus.imp.newer_intervention_pending.date)} (
+              {focus.imp.newer_intervention_pending.issue}), still collecting data.
+            </div>
+          )}
+
+          <div className="analytics-chart-note" data-testid="impact-caveat">
             <Info size={13} />
-            Observed post-intervention
-            change. Not a causal estimate.
+            {caveat}
           </div>
         </section>
 
@@ -1095,19 +1323,23 @@ export default function Analytics() {
               </span>
 
               <h2>
-                {safeValue(
-                  merchant.name,
+                {merchant.id ? (
+                  <Link to={`/merchants/${merchant.id}`} style={{ color: 'inherit' }}>
+                    {merchant.name}
+                  </Link>
+                ) : (
+                  safeValue(merchant.name)
                 )}
               </h2>
 
               <p>
                 {safeValue(
-                  merchant.location,
+                  merchant.address,
                 )}
-                {merchant.location &&
+                {merchant.address &&
                   ' · '}
                 {safeValue(
-                  data?.intervention,
+                  ivIssue,
                 )}
               </p>
             </div>
@@ -1116,7 +1348,7 @@ export default function Analytics() {
               <CheckCircle2
                 size={14}
               />
-              Measured
+              {statusBadge}
             </span>
           </div>
 
@@ -1128,7 +1360,7 @@ export default function Analytics() {
 
               <strong>
                 {safeValue(
-                  merchant.qrBefore,
+                  focus?.beforeVisit?.qr_visibility_score,
                 )}
 
                 <ArrowRight
@@ -1136,14 +1368,14 @@ export default function Analytics() {
                 />
 
                 {safeValue(
-                  merchant.qrAfter,
+                  focus?.afterVisit?.qr_visibility_score,
                 )}
               </strong>
 
               <small>
-                {merchant.qrChange
-                  ? `+${merchant.qrChange} pts`
-                  : '—'}
+                {focus?.afterVisit
+                  ? signedPts(focus?.beforeVisit?.qr_visibility_score, focus.afterVisit.qr_visibility_score)
+                  : 'No visit since the intervention'}
               </small>
             </div>
 
@@ -1154,7 +1386,7 @@ export default function Analytics() {
 
               <strong>
                 {safeValue(
-                  merchant.txBefore,
+                  mImpact?.baseline_avg_txn_count,
                 )}
 
                 <ArrowRight
@@ -1162,12 +1394,12 @@ export default function Analytics() {
                 />
 
                 {safeValue(
-                  merchant.txAfter,
+                  mImpact?.post_avg_txn_count,
                 )}
               </strong>
 
               <small>
-                Observed movement
+                Observed movement (avg per day)
               </small>
             </div>
 
@@ -1178,7 +1410,7 @@ export default function Analytics() {
 
               <strong>
                 {safeValue(
-                  merchant.competitorBefore,
+                  focus?.auditBefore?.competitor_dominance,
                 )}
 
                 <ArrowRight
@@ -1186,12 +1418,14 @@ export default function Analytics() {
                 />
 
                 {safeValue(
-                  merchant.competitorAfter,
+                  focus?.auditAfter?.competitor_dominance,
                 )}
               </strong>
 
               <small>
-                Current assessment
+                {focus?.auditAfter?.competitor || focus?.auditBefore?.competitor
+                  ? `${focus?.auditAfter?.competitor || focus?.auditBefore?.competitor} dominance, latest audit`
+                  : 'Current assessment'}
               </small>
             </div>
 
@@ -1202,12 +1436,14 @@ export default function Analytics() {
 
               <strong className="text-value">
                 {safeValue(
-                  data?.intervention,
+                  ivIssue,
                 )}
               </strong>
 
               <small>
-                Completed action
+                {focus?.imp?.intervention?.date
+                  ? `Guidance sent ${fmtDate(focus.imp.intervention.date)}`
+                  : 'Completed action'}
               </small>
             </div>
           </div>
@@ -1264,19 +1500,15 @@ export default function Analytics() {
 
                 <h3>
                   {safeValue(
-                    selectedInterventionData[0],
+                    selectedInterventionData.label,
                   )}
                 </h3>
 
                 <p>
-                  {safeValue(
-                    selectedInterventionData[2],
-                  )}{' '}
-                  completed interventions with{' '}
-                  {safeValue(
-                    selectedInterventionData[3],
-                  )}{' '}
-                  measured outcomes.
+                  {selectedInterventionData.merchants}{' '}
+                  merchants measured,{' '}
+                  {selectedInterventionData.positive}{' '}
+                  with a positive observed change.
                 </p>
               </div>
 
@@ -1286,13 +1518,94 @@ export default function Analytics() {
                 </span>
 
                 <strong>
-                  {safeValue(
-                    selectedInterventionData[4],
+                  {fmtPct(
+                    selectedInterventionData.avg,
                   )}
                 </strong>
               </div>
             </div>
           )}
+        </section>
+
+        {/* ---------------------------------------------------------------- */}
+        {/* Per-merchant observed change                                      */}
+        {/* ---------------------------------------------------------------- */}
+
+        <section className="analytics-section-card">
+          <div className="analytics-section-head">
+            <div>
+              <span className="analytics-mini-label">
+                MERCHANT OUTCOMES
+              </span>
+
+              <h2>
+                Observed change by merchant
+              </h2>
+
+              <p>
+                Each merchant&apos;s most recent measurable
+                intervention. Select a row to chart it.
+              </p>
+            </div>
+
+            <div className="analytics-table-count">
+              <Filter size={14} />
+              {merchantsList.length} merchants
+            </div>
+          </div>
+
+          {!merchantsList.length ? (
+            <div className="analytics-empty">
+              <BarChart3 size={20} />
+              <span>No merchant has a measurable intervention yet.</span>
+            </div>
+          ) : (
+            <div className="analytics-table">
+              <div className="analytics-table-head">
+                <span>MERCHANT</span>
+                <span>INTERVENTION</span>
+                <span>DATE</span>
+                <span>OBSERVED CHANGE</span>
+                <span>MERCHANT 360</span>
+              </div>
+
+              {merchantsList.map((row) => (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  key={row.merchant_id}
+                  className={`analytics-table-row ${merchantId === row.merchant_id ? 'selected' : ''}`}
+                  onClick={() => selectMerchant(row.merchant_id)}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && selectMerchant(row.merchant_id)}
+                >
+                  <span className="analytics-intervention-name">
+                    <i />
+                    {row.merchant_name}
+                  </span>
+                  <span>{ACTION_LABEL[row.action] || row.action}</span>
+                  <span>{fmtDate(row.intervention_date)}</span>
+                  <span className={row.change_pct > 0 ? 'analytics-positive' : ''}>
+                    {row.change_pct > 0 && <ArrowUpRight size={14} />}
+                    {fmtPct(row.change_pct)}
+                  </span>
+                  <span>
+                    <Link
+                      to={`/merchants/${row.merchant_id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ color: '#1F5BFF', fontWeight: 600 }}
+                    >
+                      Open #{row.merchant_id} →
+                    </Link>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="analytics-chart-note">
+            <Info size={13} />
+            {impact.caveat}
+          </div>
         </section>
 
         {/* ---------------------------------------------------------------- */}
@@ -1311,8 +1624,9 @@ export default function Analytics() {
               </h2>
 
               <p>
-                Observed transaction change over
-                the selected period.
+                Daily transaction value for{' '}
+                {safeValue(merchant.name)} ·{' '}
+                {rangeLabel.toLowerCase()}.
               </p>
             </div>
 
@@ -1323,13 +1637,23 @@ export default function Analytics() {
           </div>
 
           <ImpactChart
-            values={filteredTrend}
+            values={trendValues}
             labels={trendLabels}
             selectedPoint={
-              selectedPoint
+              trendPoint
             }
             onSelectPoint={
-              setSelectedPoint
+              setTrendPoint
+            }
+            formatValue={(v) => fmtInr(v)}
+            emptyText={
+              txnError
+                ? `Could not load transactions: ${errText(txnError)}`
+                : !merchantId
+                  ? 'Select a merchant to see its transactions.'
+                  : txns
+                    ? 'No transactions in this window.'
+                    : 'Loading transactions…'
             }
           />
 
@@ -1339,19 +1663,17 @@ export default function Analytics() {
                 Current observed change
               </span>
               <strong>
-                {safeValue(
-                  kpis[1]?.[1],
-                )}
+                {fmtPct(mImpact?.change_pct)}
               </strong>
             </div>
 
             <div>
               <span>
-                Visits measured
+                Merchants measured
               </span>
               <strong>
                 {safeValue(
-                  kpis[4]?.[1],
+                  impact.merchants_measured,
                 )}
               </strong>
             </div>
@@ -1383,13 +1705,12 @@ export default function Analytics() {
 
             <h2>
               {safeValue(
-                data?.insight,
+                insight,
               )}
             </h2>
 
             <p>
-              Recommendations are based on measured
-              field outcomes available to SightPay.
+              {impact.caveat}
             </p>
           </div>
 
@@ -1402,6 +1723,85 @@ export default function Analytics() {
             Measurement queue
             <ArrowRight size={15} />
           </button>
+        </section>
+
+        {/* ---------------------------------------------------------------- */}
+        {/* Field operations (GET /dashboard)                                 */}
+        {/* ---------------------------------------------------------------- */}
+
+        <section className="analytics-section-card">
+          <div className="analytics-section-head">
+            <div>
+              <span className="analytics-mini-label">
+                FIELD OPERATIONS
+              </span>
+
+              <h2>
+                Operations dashboard
+              </h2>
+
+              <p>
+                Today and the last 7 days, all reps.
+              </p>
+            </div>
+
+            <div className="analytics-table-count">
+              <Filter size={14} />
+              {Object.entries(dash?.decision_breakdown_7d || {})
+                .map(([d, n]) => `${DECISION_LABEL[d] || d}: ${n}`)
+                .join(' · ') || 'No decisions in 7 days'}
+            </div>
+          </div>
+
+          <div className="analytics-kpis">
+            {opsKpis.map(([label, value, detail, Icon]) => (
+              <ImpactKpi key={label} label={label} value={value} detail={detail} icon={Icon} />
+            ))}
+          </div>
+        </section>
+
+        {/* ---------------------------------------------------------------- */}
+        {/* System / provider health (GET /health)                            */}
+        {/* ---------------------------------------------------------------- */}
+
+        <section className="analytics-merchant-card">
+          <div className="analytics-merchant-heading">
+            <div>
+              <span className="analytics-mini-label">
+                SYSTEM HEALTH
+              </span>
+
+              <h2>
+                Providers and pipeline
+              </h2>
+
+              <p>
+                Configured state from GET /api/health (not uptime).
+              </p>
+            </div>
+
+            <span className="analytics-measured-badge">
+              <CheckCircle2 size={14} />
+              {health ? `API ${health.status}` : data?.health?.error ? 'Unavailable' : '—'}
+            </span>
+          </div>
+
+          {data?.health?.error ? (
+            <div className="analytics-empty">
+              <Info size={20} />
+              <span>Could not load /api/health: {errText(data.health.error)}</span>
+            </div>
+          ) : (
+            <div className="analytics-merchant-grid">
+              {healthTiles.map(([label, value, detail]) => (
+                <div key={label}>
+                  <span>{label}</span>
+                  <strong className="text-value">{safeValue(value)}</strong>
+                  <small>{detail}</small>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* ---------------------------------------------------------------- */}

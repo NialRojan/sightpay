@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import './styles/sightpay.css'
 
 import Landing from './pages/Landing'
@@ -11,7 +11,7 @@ import VisitAudit from './pages/VisitAudit'
 import AIAudit from './pages/AIAudit'
 import Manager from './pages/Manager'
 import Analytics from './pages/Analytics'
-import { LatestVisitRedirect, TopMerchantRedirect } from './components/Redirects'
+import { HomeRedirect, LatestVisitRedirect, TopMerchantRedirect } from './components/Redirects'
 
 export default function SightPayRoutes() {
   return (
@@ -33,7 +33,7 @@ export default function SightPayRoutes() {
       <Route path="/manager" element={<Manager />} />
       <Route path="/analytics" element={<Analytics />} />
       <Route path="/fse/impact" element={<Analytics />} />
-      <Route path="*" element={<Navigate to="/fse" replace />} />
+      <Route path="*" element={<HomeRedirect />} />
     </Routes>
   )
 }

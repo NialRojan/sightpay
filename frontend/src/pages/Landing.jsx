@@ -19,7 +19,6 @@ import {
   Brain,
   X,
 } from 'lucide-react'
-import { merchants } from '../data/demoData'
 
 /* ============================================================
    CONTENT (from the SightPay project overview)
@@ -518,7 +517,7 @@ function Impact({ seen }) {
 export default function Landing() {
   const nav = useNavigate()
   const [scrolled, setScrolled] = useState(false)
-  const merchantName = merchants?.[0]?.name ?? 'Sharma Kirana Store'
+  const merchantName = 'Ramesh General Store' // illustration only (seed merchant #1)
 
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > 12)
@@ -545,7 +544,7 @@ export default function Landing() {
           <a href="#product" onClick={(e) => { e.preventDefault(); go('product') }}>Product</a>
           <a href="#how" onClick={(e) => { e.preventDefault(); go('how') }}>How it works</a>
           <a href="#stack" onClick={(e) => { e.preventDefault(); go('stack') }}>AI stack</a>
-          <a href="/manager" onClick={(e) => { e.preventDefault(); nav('/manager') }}>For managers</a>
+          <a href="/login?role=manager" onClick={(e) => { e.preventDefault(); nav('/login?role=manager') }}>For managers</a>
         </nav>
         <div className="lp-nav-cta">
           <button className="lp-btn ghost" onClick={() => nav('/login')}>Sign in</button>
@@ -573,7 +572,7 @@ export default function Landing() {
               <button className="lp-btn primary lg" onClick={() => nav('/login')}>
                 Explore SightPay <ArrowRight size={16} />
               </button>
-              <button className="lp-btn lg" onClick={() => nav('/fse')}>View field dashboard</button>
+              <button className="lp-btn lg" onClick={() => nav('/login?role=fse')}>View field dashboard</button>
             </div>
 
             <div className="lp-stats">
@@ -635,7 +634,7 @@ export default function Landing() {
             <button className="lp-btn light lg" onClick={() => nav('/login')}>
               Enter SightPay <ArrowRight size={16} />
             </button>
-            <button className="lp-btn outline lg" onClick={() => nav('/manager')}>For managers</button>
+            <button className="lp-btn outline lg" onClick={() => nav('/login?role=manager')}>For managers</button>
           </div>
         </Reveal>
       </section>
