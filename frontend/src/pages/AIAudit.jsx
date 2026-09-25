@@ -20,6 +20,15 @@ import {
 } from 'lucide-react'
 
 import Layout from '../components/Layout'
+import { visitPhotoUrl, listVisits } from '../services/visits'
+import { listFlaggedVisits } from '../services/fraud'
+import { analyzeImage } from '../services/audits'
+import { fmtDate, fmtTime, SIGNAL_LABEL } from '../services/format'
+import { useVisitEvidence, errorText } from '../components/visit/useVisitEvidence'
+import {
+  actionLabel, auditChecks, decisionLabel, guidanceEngine, paytmProminent, qrClear, signalsByName, statusLabel,
+  statusPill, suspiciousOf,
+} from '../components/visit/evidence'
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -34,26 +43,10 @@ const getScoreTone = (score) => {
   return 'low'
 }
 
-/* -------------------------------------------------------------------------- */
-/* API                                                                        */
-/* -------------------------------------------------------------------------- */
-
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL || ''
-
-async function fetchAudit(id) {
-  const response = await fetch(
-    `${API_BASE}/visits/${encodeURIComponent(id)}/audit`,
-  )
-
-  if (!response.ok) {
-    throw new Error(
-      `Unable to load audit (${response.status})`,
-    )
-  }
-
-  return response.json()
-}
+// Evidence rows: pass -> verified, warn -> pending (clock), fail -> failed, missing -> pending.
+const signalTone = (s) => (!s ? 'pending' : s.status === 'pass' ? 'verified' : s.status === 'fail' ? 'failed' : 'pending')
+const signalValue = (s, fallback = 'Not recorded') =>
+  !s ? fallback : `${s.status.toUpperCase()}${s.penalty ? ` (−${s.penalty})` : ''}`
 
 /* -------------------------------------------------------------------------- */
 /* Score Ring                                                                 */
@@ -187,12 +180,13 @@ function AIFinding({
 }
 
 /* -------------------------------------------------------------------------- */
-/* Loading                                                                     */
+/* Loading / states                                                           */
 /* -------------------------------------------------------------------------- */
 
 function AuditLoading() {
   return (
     <Layout crumb="AI Audit">
+      <style>{AUDIT_CSS}</style>
       <div className="pad">
         <div className="card audit-state">
           <div className="audit-loader" />
@@ -206,286 +200,556 @@ function AuditLoading() {
   )
 }
 
+function AuditState({ title, message, children }) {
+  return (
+    <Layout crumb="AI Audits">
+      <style>{AUDIT_CSS}</style>
+      <div className="pad">
+        <div className="card audit-state">
+          <XCircle size={28} />
+          <h2>{title}</h2>
+          <p className="mu">{message}</p>
+          <div style={{ display: 'flex', gap: 9, justifyContent: 'center', marginTop: 12 }}>
+            {children}
+            <Link to="/fse/audits" className="btn p">Back to AI Audits</Link>
+          </div>
+        </div>
+      </div>
+    </Layout>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Vision findings (shared by a visit's audit and the photo-audit tool)       */
+/* -------------------------------------------------------------------------- */
+
+function AuditFindings({ audit, quality, provider, payload }) {
+  const [copied, setCopied] = useState(false)
+  const score = clamp(audit.qr_visibility_score)
+  const confidence = clamp(Number(audit.confidence ?? 0) * 100)
+  const actionRequired = audit.recommended_action && audit.recommended_action !== 'none'
+  const quality_ = auditChecks(audit, quality).find((c) => c.key === 'quality')
+  const suspicious = suspiciousOf(audit)
+
+  const copyPayload = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <>
+      {/* Overall score */}
+      <div className="audit-score-layout">
+        <ScoreRing score={score} />
+        <div className="audit-score-copy">
+          <h3>{actionRequired ? 'Intervention required' : 'Counter condition acceptable'}</h3>
+          <p className="mu sm">
+            {actionLabel(audit.recommended_action)}
+            {audit.notes ? ` — ${audit.notes}` : ''}
+          </p>
+          <div className="confidence-pill">
+            <ShieldCheck size={14} />
+            AI confidence {Math.round(confidence)}% · {provider || audit.provider || 'provider unknown'}
+          </div>
+        </div>
+      </div>
+
+      {/* Individual findings */}
+      <div className="finding-list">
+        <AIFinding
+          title="Paytm QR visibility"
+          value={`${Math.round(score)}/100`}
+          score={score}
+          description={score >= 70 ? 'QR is clearly visible' : 'QR visibility below the 70 threshold'}
+          status={score >= 70 ? 'pass' : 'fail'}
+        />
+        <AIFinding
+          title="QR clearly visible (not obstructed)"
+          value={qrClear(audit) ? 'Yes' : audit.paytm_qr_visible ? 'Obstructed' : 'Not visible'}
+          score={qrClear(audit) ? 100 : 0}
+          description={qrClear(audit) ? 'Paytm QR visible and unobstructed' : audit.paytm_qr_visible ? 'Paytm QR is partly blocked' : 'No Paytm QR found in the photo'}
+          status={qrClear(audit) ? 'pass' : 'fail'}
+        />
+        <AIFinding
+          title="Soundbox"
+          value={audit.soundbox_visible ? 'Visible' : 'Not visible'}
+          score={audit.soundbox_visible ? 100 : 0}
+          description={audit.soundbox_visible ? 'Paytm Soundbox visible on the counter' : 'Soundbox was not visible'}
+          status={audit.soundbox_visible ? 'pass' : 'fail'}
+        />
+        <AIFinding
+          title="Paytm counter prominence"
+          value={paytmProminent(audit) ? 'Strong' : 'Low'}
+          score={paytmProminent(audit) ? 100 : 0}
+          description={audit.competitor ? `${audit.competitor} dominance: ${audit.competitor_dominance || '—'}` : 'No competitor detected'}
+          status={paytmProminent(audit) ? 'pass' : 'fail'}
+        />
+        {quality_ && (
+          <AIFinding
+            title="Image quality"
+            value={quality_.value}
+            score={quality_.pass ? 100 : 0}
+            description={
+              suspicious.length ? `Suspicious signals: ${suspicious.join(', ')}`
+                : quality?.brightness != null ? `Brightness ${Math.round(quality.brightness)}` : 'No suspicious image signals'
+            }
+            status={quality_.pass && !suspicious.length ? 'pass' : 'fail'}
+          />
+        )}
+      </div>
+
+      {/* Structured output: the backend payload as returned */}
+      <div className="audit-json">
+        <div className="audit-json-header">
+          <span>VISION AI · STRUCTURED OUTPUT</span>
+          <button onClick={copyPayload} title="Copy structured audit payload">
+            {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
+          </button>
+        </div>
+        <pre>{JSON.stringify(payload, null, 2)}</pre>
+      </div>
+    </>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* /audits/:id — the Vision AI audit of one visit                             */
+/* -------------------------------------------------------------------------- */
+
+function VisitAIAudit({ id }) {
+  const { visit: v, fraud, error, loading, busy } = useVisitEvidence(id)
+
+  if (loading) return <AuditLoading />
+  if (error || !v) {
+    return <AuditState title="Audit unavailable" message={errorText(error) || 'The requested AI audit could not be loaded.'} />
+  }
+  if (!v.audit) {
+    return (
+      <AuditState
+        title={v.status === 'analyzing' || busy ? 'Vision AI is still analyzing' : 'No audit for this visit yet'}
+        message={`Visit #${v.id} at ${v.merchant_name} is ${statusLabel(v.status).toLowerCase()}. ${v.status === 'submitted' || v.status === 'failed' ? 'Run the analysis from the visit page.' : ''}`}
+      >
+        <Link to={`/visits/${v.id}`} className="btn">Visit Evidence</Link>
+      </AuditState>
+    )
+  }
+
+  const audit = v.audit
+  const signals = (fraud || v.authenticity || {}).signals || []
+  const byName = signalsByName(signals)
+  const photo = visitPhotoUrl(v)
+  const actionRequired = audit.recommended_action && audit.recommended_action !== 'none'
+  const log = v.pipeline_log || []
+  const engine = guidanceEngine(log)
+  const whatsapp = (v.actions?.notifications || [])[0]
+
+  return (
+    <Layout crumb="AI Audit">
+      <style>{AUDIT_CSS}</style>
+
+      <div className="pad ai-audit-page">
+        <div className="audit-breadcrumb">
+          <Link to="/fse/audits" className="audit-back">
+            <ArrowLeft size={15} />
+            AI Audits
+          </Link>
+          <span className="mu">/</span>
+          <span className="mu">Visit #{v.id}</span>
+        </div>
+
+        <div className="audit-header">
+          <div className="audit-title-wrap">
+            <div className="eyebrow">COMPUTER VISION · VISIT AUDIT</div>
+            <h1>{v.merchant_name}</h1>
+            <div className="audit-title-meta">
+              <span className="mu">Visit #{v.id}</span>
+              <span className="mu">·</span>
+              <span className="mu">{fmtDate(v.received_at)} {fmtTime(v.received_at)}</span>
+              <span className="audit-status">
+                <Target size={13} />
+                {actionRequired ? `Action Required: ${actionLabel(audit.recommended_action)}` : 'Audit Passed'}
+              </span>
+              <span className={`pill ${statusPill(v.status)}`}>{statusLabel(v.status)}</span>
+            </div>
+          </div>
+
+          <div className="audit-actions">
+            <Link to={`/visits/${v.id}`} className="btn">Visit Evidence</Link>
+            <Link to={`/merchants/${v.merchant_id}`} className="btn p">
+              Merchant 360
+              <ArrowRight size={14} />
+            </Link>
+          </div>
+        </div>
+
+        <div className="audit-grid">
+          <div>
+            <section className="card audit-main-card">
+              <div className="audit-photo">
+                {photo ? (
+                  <img src={photo} alt={`Captured merchant counter at ${v.merchant_name}`} />
+                ) : (
+                  <div className="audit-photo-placeholder">
+                    <Camera size={38} />
+                    <strong>No photo: historical visit</strong>
+                    <span>Seeded visits carry an audit but no image.</span>
+                  </div>
+                )}
+
+                <div className="audit-photo-overlay">
+                  <div className="audit-photo-label">
+                    <i />
+                    CAPTURED VISIT EVIDENCE
+                  </div>
+                  <div className="audit-photo-footer">
+                    <span>
+                      <Camera size={13} />
+                      {v.capture_source === 'gallery' ? 'Picked from gallery' : v.capture_source === 'camera' ? 'In-app camera' : 'Capture source unknown'}
+                    </span>
+                    <span>
+                      <Eye size={13} />
+                      Vision: {audit.provider || '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="audit-findings">
+                <div className="audit-card-heading">
+                  <div>
+                    <div className="eyebrow">VISION AI</div>
+                    <h2>Counter Audit</h2>
+                    <span className="mu sm">Structured analysis of the captured merchant counter.</span>
+                  </div>
+                  <Sparkles size={19} color="#1F5BFF" />
+                </div>
+                <AuditFindings audit={audit} provider={audit.provider} payload={audit} />
+              </div>
+            </section>
+
+            <div className="audit-context-grid">
+              <div className="audit-context-item">
+                <span>MERCHANT</span>
+                <strong>{v.merchant_name}</strong>
+              </div>
+              <div className="audit-context-item">
+                <span>FIELD EXECUTIVE</span>
+                <strong>{v.fse_name}</strong>
+              </div>
+              <div className="audit-context-item">
+                <span>LOCATION</span>
+                <strong>{v.lat != null ? `${v.lat.toFixed(5)}, ${v.lng.toFixed(5)}` : '—'}</strong>
+              </div>
+              <div className="audit-context-item">
+                <span>AUDIT ID</span>
+                <strong>Visit #{v.id}</strong>
+              </div>
+            </div>
+          </div>
+
+          <aside className="audit-side">
+            <section className="card audit-side-card">
+              <div className="audit-card-heading">
+                <div>
+                  <div className="eyebrow">EVIDENCE GATE</div>
+                  <h2>Visit Verification</h2>
+                </div>
+                <ShieldCheck size={18} color="#1F5BFF" />
+              </div>
+
+              <div className="audit-evidence-list">
+                <EvidenceSignal icon={MapPin} label={SIGNAL_LABEL.gps} value={signalValue(byName.gps)} detail={byName.gps?.detail} status={signalTone(byName.gps)} />
+                <EvidenceSignal
+                  icon={Clock3}
+                  label={SIGNAL_LABEL.timestamp}
+                  value={signalValue(byName.timestamp)}
+                  detail={byName.timestamp?.detail || (v.captured_at ? `Captured ${fmtDate(v.captured_at)} ${fmtTime(v.captured_at)}` : undefined)}
+                  status={signalTone(byName.timestamp)}
+                />
+                <EvidenceSignal icon={Camera} label={SIGNAL_LABEL.live_capture} value={signalValue(byName.live_capture)} detail={byName.live_capture?.detail} status={signalTone(byName.live_capture)} />
+                <EvidenceSignal icon={Fingerprint} label={SIGNAL_LABEL.duplicate_image} value={signalValue(byName.duplicate_image)} detail={byName.duplicate_image?.detail} status={signalTone(byName.duplicate_image)} />
+                <EvidenceSignal icon={UserCheck} label={SIGNAL_LABEL.exif} value={signalValue(byName.exif)} detail={byName.exif?.detail} status={signalTone(byName.exif)} />
+              </div>
+              {!signals.length && <p className="mu sm">No per-signal breakdown recorded for this visit (seeded historical visit).</p>}
+            </section>
+
+            <section className="card recommendation-card">
+              <div className="recommendation-icon">
+                <Zap size={18} />
+              </div>
+              <div className="eyebrow">AI RECOMMENDATION</div>
+              <h3>{actionLabel(audit.recommended_action)}</h3>
+              <p className="mu sm">
+                {(v.decision_reasons || []).join(' · ') || 'Recommendation generated from the counter-level Vision AI findings.'}
+              </p>
+              <div className="recommendation-meta">
+                <Target size={13} />
+                Evidence → Finding → Recommended action
+              </div>
+            </section>
+
+            <section className="card audit-side-card">
+              <div className="audit-card-heading">
+                <div>
+                  <div className="eyebrow">DECISION ENGINE</div>
+                  <h2>Action Pipeline</h2>
+                </div>
+                <Zap size={18} color="#1F5BFF" />
+              </div>
+
+              <div className="audit-evidence-list">
+                <EvidenceSignal
+                  icon={Target}
+                  label="AI decision"
+                  value={decisionLabel(v.decision)}
+                  detail={`QR visibility ${Math.round(clamp(audit.qr_visibility_score))}/100 · confidence ${Math.round(clamp(audit.confidence * 100))}%`}
+                  status={v.decision ? (v.decision === 'fraud' ? 'failed' : 'verified') : 'pending'}
+                />
+                <EvidenceSignal
+                  icon={Sparkles}
+                  label="Merchant guidance"
+                  value={engine ? `Engine: ${engine}` : 'Not executed'}
+                  detail={log.find((e) => e.step === 'guidance')?.summary || 'No guidance step on this visit'}
+                  status={engine ? 'verified' : 'pending'}
+                />
+                <EvidenceSignal
+                  icon={Zap}
+                  label="Pipeline"
+                  value={v.pipeline_mode || '—'}
+                  detail={whatsapp ? `WhatsApp ${whatsapp.status} to ${whatsapp.to_phone}` : `${log.length} pipeline step(s) logged`}
+                  status={v.pipeline_mode ? 'verified' : 'pending'}
+                />
+              </div>
+
+              <Link
+                to={`/visits/${v.id}`}
+                className="btn p"
+                style={{ width: '100%', marginTop: 12, justifyContent: 'center' }}
+              >
+                Continue to Visit Evidence
+                <ArrowRight size={14} />
+              </Link>
+            </section>
+
+            <section className="card audit-side-card">
+              <div className="eyebrow">EVIDENCE INTEGRITY</div>
+              <h3 style={{ margin: '5px 0 8px' }}>Evidence fingerprint</h3>
+              <p className="mu sm" style={{ lineHeight: 1.5, marginBottom: 12 }}>
+                The photo is compared with earlier visit photos to detect reused evidence.
+              </p>
+              <div
+                style={{
+                  padding: 11,
+                  borderRadius: 10,
+                  background: '#f4f7ff',
+                  border: '1px solid #dde7fb',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  fontSize: 10,
+                  wordBreak: 'break-all',
+                  color: '#52688f',
+                }}
+              >
+                {byName.duplicate_image?.detail || 'Fingerprint check not recorded for this visit'}
+              </div>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </Layout>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* /fse/audits — audit a photo (stateless) + flagged and recent visit audits  */
+/* -------------------------------------------------------------------------- */
+
+function useList(load) {
+  const [state, setState] = useState({ rows: null, error: null })
+  useEffect(() => {
+    let alive = true
+    load().then(
+      (rows) => alive && setState({ rows, error: null }),
+      (error) => alive && setState({ rows: [], error }),
+    )
+    return () => { alive = false }
+  }, [load])
+  return state
+}
+
+const loadFlagged = () => listFlaggedVisits()
+const loadRecent = () => listVisits({ limit: 12 })
+
+function VisitRows({ state, to, empty, verdict }) {
+  if (!state.rows) return <p className="mu sm">Loading…</p>
+  if (state.error) return <p className="mu sm">Could not load: {errorText(state.error)}</p>
+  if (!state.rows.length) return <p className="mu sm">{empty}</p>
+  return (
+    <div className="audit-evidence-list">
+      {state.rows.map((r) => (
+        <Link key={r.id} to={to(r)} style={{ color: 'inherit', textDecoration: 'none' }}>
+          <EvidenceSignal
+            icon={Store}
+            label={`Visit #${r.id} · ${fmtDate(r.received_at)} · ${r.fse_name}`}
+            value={r.merchant_name}
+            detail={
+              verdict
+                ? `${r.verdict} · authenticity ${r.authenticity_score ?? '—'}/100 · ${statusLabel(r.status)}`
+                : `QR ${r.qr_visibility_score ?? '—'}/100 · ${decisionLabel(r.decision)}`
+            }
+            status={verdict ? (r.verdict === 'BLOCKED' ? 'failed' : 'pending') : r.decision === 'compliant' ? 'verified' : r.decision ? 'failed' : 'pending'}
+          />
+        </Link>
+      ))}
+    </div>
+  )
+}
+
+function AuditsHome() {
+  const [file, setFile] = useState(null)
+  const [result, setResult] = useState(null)
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState(null)
+  const flagged = useList(loadFlagged)
+  const recent = useList(loadRecent)
+  const preview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file])
+  useEffect(() => () => preview && URL.revokeObjectURL(preview), [preview])
+
+  const pick = (e) => {
+    setFile(e.target.files?.[0] || null)
+    setResult(null)
+    setError(null)
+  }
+
+  const run = async () => {
+    if (!file) return
+    setRunning(true)
+    setError(null)
+    try {
+      setResult(await analyzeImage(file))
+    } catch (e) {
+      setResult(null)
+      setError(e)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <Layout crumb="AI Audits">
+      <style>{AUDIT_CSS}</style>
+
+      <div className="pad ai-audit-page">
+        <div className="audit-header">
+          <div className="audit-title-wrap">
+            <div className="eyebrow">COMPUTER VISION · AI AUDITS</div>
+            <h1>AI Audits</h1>
+            <div className="audit-title-meta">
+              <span className="mu">Audit a counter photo without creating a visit, or open a visit&apos;s audit.</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="audit-grid">
+          <div>
+            <section className="card audit-main-card">
+              <div className="audit-photo">
+                {preview ? (
+                  <img src={preview} alt="Counter photo to audit" />
+                ) : (
+                  <div className="audit-photo-placeholder">
+                    <Camera size={38} />
+                    <strong>Choose a counter photo</strong>
+                    <span>JPEG, PNG or WebP up to 10 MB. Nothing is stored.</span>
+                  </div>
+                )}
+                <div className="audit-photo-overlay">
+                  <div className="audit-photo-label">
+                    <i />
+                    PHOTO AUDIT · NOT SAVED
+                  </div>
+                </div>
+              </div>
+
+              <div className="audit-findings">
+                <div className="audit-card-heading">
+                  <div>
+                    <div className="eyebrow">VISION AI</div>
+                    <h2>Audit a photo</h2>
+                    <span className="mu sm">Runs the same Vision AI audit as a visit (POST /audit/analyze-image).</span>
+                  </div>
+                  <Sparkles size={19} color="#1F5BFF" />
+                </div>
+
+                <div className="audit-actions" style={{ marginBottom: 16, alignItems: 'center' }}>
+                  <label className="btn" style={{ cursor: 'pointer' }}>
+                    <Camera size={14} /> {file ? file.name : 'Choose photo'}
+                    <input type="file" accept="image/jpeg,image/png,image/webp" onChange={pick} style={{ display: 'none' }} data-testid="audit-photo-input" />
+                  </label>
+                  <button className="btn p" onClick={run} disabled={!file || running}>
+                    {running ? 'Auditing…' : 'Run audit'}
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
+
+                {error && <p className="mu sm" style={{ color: '#DC2626', marginBottom: 12 }}>Audit failed: {errorText(error)}</p>}
+                {result && (
+                  <AuditFindings audit={result.audit} quality={result.quality} provider={result.provider} payload={result} />
+                )}
+                {!result && !error && <p className="mu sm">Pick a photo and run the audit to see the structured findings.</p>}
+              </div>
+            </section>
+          </div>
+
+          <aside className="audit-side">
+            <section className="card audit-side-card">
+              <div className="audit-card-heading">
+                <div>
+                  <div className="eyebrow">EVIDENCE GATE</div>
+                  <h2>Flagged visits</h2>
+                  <span className="mu sm">Authenticity review required or blocked</span>
+                </div>
+                <ShieldCheck size={18} color="#1F5BFF" />
+              </div>
+              <VisitRows state={flagged} to={(r) => `/visits/${r.id}`} verdict empty="No flagged visits: every recent visit passed the combined evidence signals." />
+            </section>
+
+            <section className="card audit-side-card">
+              <div className="audit-card-heading">
+                <div>
+                  <div className="eyebrow">VISION AI</div>
+                  <h2>Recent visit audits</h2>
+                </div>
+                <Eye size={18} color="#1F5BFF" />
+              </div>
+              <VisitRows state={recent} to={(r) => `/audits/${r.id}`} empty="No visits yet." />
+            </section>
+          </aside>
+        </div>
+      </div>
+    </Layout>
+  )
+}
+
 /* -------------------------------------------------------------------------- */
 /* Main                                                                       */
 /* -------------------------------------------------------------------------- */
 
 export default function AIAudit() {
   const { id } = useParams()
+  return id ? <VisitAIAudit id={id} /> : <AuditsHome />
+}
 
-  const [audit, setAudit] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
+/* -------------------------------------------------------------------------- */
+/* Styles (unchanged from the original page)                                  */
+/* -------------------------------------------------------------------------- */
 
-  /* ---------------------------------------------------------------------- */
-  /* Fetch real audit                                                       */
-  /* ---------------------------------------------------------------------- */
+const AUDIT_CSS = `
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
-      setLoading(true)
-      setError('')
-
-      try {
-        const data = await fetchAudit(id)
-
-        if (!cancelled) {
-          setAudit(data)
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err?.message ||
-              'Unable to load this AI audit.',
-          )
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
-      }
-    }
-
-    if (id) {
-      load()
-    } else {
-      setLoading(false)
-      setError('No audit ID was provided.')
-    }
-
-    return () => {
-      cancelled = true
-    }
-  }, [id])
-
-  /* ---------------------------------------------------------------------- */
-  /* Normalized values                                                      */
-  /* ---------------------------------------------------------------------- */
-
-  const view = useMemo(() => {
-    if (!audit) return null
-
-    /*
-     * Backend contract:
-     *
-     * {
-     *   visit_id,
-     *   merchant,
-     *   location,
-     *   fse,
-     *   captured_image_url,
-     *
-     *   audit: {
-     *     visibility_score,
-     *     qr_visibility_score,
-     *     qr_near_billing,
-     *     soundbox_present,
-     *     soundbox_visible,
-     *     paytm_dominance,
-     *     competitor_detected,
-     *     competitor_name,
-     *     competitor_dominance,
-     *     confidence,
-     *     recommended_action
-     *   },
-     *
-     *   evidence: {
-     *     gps,
-     *     timestamp,
-     *     geofence,
-     *     image,
-     *     image_hash,
-     *     merchant_match
-     *   },
-     *
-     *   execution: {
-     *     ai_decision,
-     *     sarvam_status,
-     *     n8n_status
-     *   }
-     * }
-     */
-
-    const ai = audit.audit || {}
-    const evidence = audit.evidence || {}
-    const execution = audit.execution || {}
-
-    return {
-      visitId:
-        audit.visit_id ||
-        audit.visitId ||
-        id,
-
-      merchantName:
-        audit.merchant?.name ||
-        audit.merchant_name ||
-        'Merchant',
-
-      merchantId:
-        audit.merchant?.id ||
-        audit.merchant_id,
-
-      location:
-        audit.merchant?.location ||
-        audit.location ||
-        'Location unavailable',
-
-      fse:
-        audit.fse?.name ||
-        audit.fse_name ||
-        'Field Executive',
-
-      image:
-        audit.captured_image_url ||
-        audit.image_url ||
-        audit.imageUrl ||
-        '',
-
-      timestamp:
-        audit.timestamp ||
-        evidence.timestamp ||
-        'Timestamp unavailable',
-
-      score: clamp(
-        ai.visibility_score ??
-          audit.visibility_score ??
-          0,
-      ),
-
-      confidence: clamp(
-        Number(ai.confidence ?? 0) * 100 > 1
-          ? ai.confidence
-          : Number(ai.confidence ?? 0) * 100,
-      ),
-
-      qrVisibility: clamp(
-        ai.qr_visibility_score ??
-          audit.qr_visibility_score ??
-          0,
-      ),
-
-      qrNearBilling:
-        Boolean(ai.qr_near_billing),
-
-      soundboxPresent:
-        Boolean(ai.soundbox_present),
-
-      soundboxVisible:
-        Boolean(ai.soundbox_visible),
-
-      paytmDominance:
-        Boolean(ai.paytm_dominance),
-
-      competitorDetected:
-        Boolean(ai.competitor_detected),
-
-      competitor:
-        ai.competitor_name ||
-        'No competitor detected',
-
-      competitorLevel:
-        ai.competitor_dominance ||
-        'none',
-
-      recommendation:
-        ai.recommended_action ||
-        'No intervention recommended.',
-
-      gps:
-        evidence.gps,
-
-      geofence:
-        evidence.geofence,
-
-      imageEvidence:
-        evidence.image,
-
-      imageHash:
-        evidence.image_hash,
-
-      merchantMatch:
-        evidence.merchant_match,
-
-      aiDecision:
-        execution.ai_decision,
-
-      sarvamStatus:
-        execution.sarvam_status,
-
-      n8nStatus:
-        execution.n8n_status,
-
-      rawPayload: audit,
-    }
-  }, [audit, id])
-
-  /* ---------------------------------------------------------------------- */
-  /* Copy structured payload                                                */
-  /* ---------------------------------------------------------------------- */
-
-  const copyPayload = async () => {
-    if (!view) return
-
-    try {
-      await navigator.clipboard.writeText(
-        JSON.stringify(view.rawPayload, null, 2),
-      )
-
-      setCopied(true)
-
-      setTimeout(() => {
-        setCopied(false)
-      }, 1600)
-    } catch {
-      setCopied(false)
-    }
-  }
-
-  /* ---------------------------------------------------------------------- */
-  /* States                                                                 */
-  /* ---------------------------------------------------------------------- */
-
-  if (loading) {
-    return <AuditLoading />
-  }
-
-  if (error || !view) {
-    return (
-      <Layout crumb="AI Audits">
-        <div className="pad">
-          <div className="card audit-state">
-            <XCircle size={28} />
-
-            <h2>Audit unavailable</h2>
-
-            <p className="mu">
-              {error ||
-                'The requested AI audit could not be loaded.'}
-            </p>
-
-            <Link
-              to="/fse/audits"
-              className="btn p"
-            >
-              Back to AI Audits
-            </Link>
-          </div>
-        </div>
-      </Layout>
-    )
-  }
-
-  const actionRequired =
-    view.score < 75 ||
-    !view.qrNearBilling ||
-    !view.paytmDominance
-
-  return (
-    <Layout crumb="AI Audit">
-      <style>{`
         .ai-audit-page {
           padding-bottom: 50px;
         }
@@ -1094,732 +1358,4 @@ export default function AIAudit() {
             height: 320px;
           }
         }
-      `}</style>
-
-      <div className="pad ai-audit-page">
-
-        {/* ================================================================ */}
-        {/* BREADCRUMB                                                        */}
-        {/* ================================================================ */}
-
-        <div className="audit-breadcrumb">
-          <Link
-            to="/fse/audits"
-            className="audit-back"
-          >
-            <ArrowLeft size={15} />
-            AI Audits
-          </Link>
-
-          <span className="mu">/</span>
-
-          <span className="mu">
-            {view.visitId}
-          </span>
-        </div>
-
-        {/* ================================================================ */}
-        {/* HEADER                                                            */}
-        {/* ================================================================ */}
-
-        <div className="audit-header">
-          <div className="audit-title-wrap">
-
-            <div className="eyebrow">
-              COMPUTER VISION · VISIT AUDIT
-            </div>
-
-            <h1>
-              {view.merchantName}
-            </h1>
-
-            <div className="audit-title-meta">
-
-              <span className="mu">
-                {view.visitId}
-              </span>
-
-              <span className="mu">
-                ·
-              </span>
-
-              <span className="mu">
-                {view.timestamp}
-              </span>
-
-              <span className="audit-status">
-                <Target size={13} />
-
-                {actionRequired
-                  ? 'Action Required'
-                  : 'Audit Passed'}
-              </span>
-
-            </div>
-
-          </div>
-
-          <div className="audit-actions">
-
-            <Link
-              to={`/visits/${view.visitId}`}
-              className="btn"
-            >
-              Visit Evidence
-            </Link>
-
-            {view.merchantId && (
-              <Link
-                to={`/merchants/${view.merchantId}`}
-                className="btn p"
-              >
-                Merchant 360
-                <ArrowRight size={14} />
-              </Link>
-            )}
-
-          </div>
-        </div>
-
-        {/* ================================================================ */}
-        {/* MAIN GRID                                                         */}
-        {/* ================================================================ */}
-
-        <div className="audit-grid">
-
-          {/* ============================================================ */}
-          {/* LEFT                                                           */}
-          {/* ============================================================ */}
-
-          <div>
-
-            {/* ---------------------------------------------------------- */}
-            {/* ACTUAL CAPTURED IMAGE                                       */}
-            {/* ---------------------------------------------------------- */}
-
-            <section className="card audit-main-card">
-
-              <div className="audit-photo">
-
-                {view.image ? (
-                  <img
-                    src={view.image}
-                    alt={`Captured merchant counter at ${view.merchantName}`}
-                  />
-                ) : (
-                  <div className="audit-photo-placeholder">
-                    <Camera size={38} />
-
-                    <strong>
-                      Captured image unavailable
-                    </strong>
-
-                    <span>
-                      The audit record does not contain an image URL.
-                    </span>
-                  </div>
-                )}
-
-                <div className="audit-photo-overlay">
-
-                  <div className="audit-photo-label">
-                    <i />
-                    CAPTURED VISIT EVIDENCE
-                  </div>
-
-                  <div className="audit-photo-footer">
-
-                    <span>
-                      <Camera size={13} />
-                      Original visit image
-                    </span>
-
-                    <span>
-                      <Eye size={13} />
-                      Vision analysis
-                    </span>
-
-                  </div>
-
-                </div>
-
-              </div>
-
-              {/* -------------------------------------------------------- */}
-              {/* AI FINDINGS                                                */}
-              {/* -------------------------------------------------------- */}
-
-              <div className="audit-findings">
-
-                <div className="audit-card-heading">
-
-                  <div>
-                    <div className="eyebrow">
-                      VISION AI
-                    </div>
-
-                    <h2>
-                      Counter Audit
-                    </h2>
-
-                    <span className="mu sm">
-                      Structured analysis of the captured merchant
-                      counter.
-                    </span>
-                  </div>
-
-                  <Sparkles
-                    size={19}
-                    color="#1F5BFF"
-                  />
-
-                </div>
-
-                {/* Overall score */}
-
-                <div className="audit-score-layout">
-
-                  <ScoreRing score={view.score} />
-
-                  <div className="audit-score-copy">
-
-                    <h3>
-                      {actionRequired
-                        ? 'Intervention required'
-                        : 'Counter condition acceptable'}
-                    </h3>
-
-                    <p className="mu sm">
-                      {view.recommendation}
-                    </p>
-
-                    <div className="confidence-pill">
-                      <ShieldCheck size={14} />
-
-                      AI confidence{' '}
-                      {Math.round(view.confidence)}%
-                    </div>
-
-                  </div>
-
-                </div>
-
-                {/* Individual findings */}
-
-                <div className="finding-list">
-
-                  <AIFinding
-                    title="Paytm QR visibility"
-                    value={`${Math.round(
-                      view.qrVisibility,
-                    )}/100`}
-                    score={view.qrVisibility}
-                    description={
-                      view.qrVisibility >= 75
-                        ? 'QR is clearly visible'
-                        : 'QR visibility needs improvement'
-                    }
-                    status={
-                      view.qrVisibility >= 75
-                        ? 'pass'
-                        : 'fail'
-                    }
-                  />
-
-                  <AIFinding
-                    title="QR near billing point"
-                    value={
-                      view.qrNearBilling
-                        ? 'Detected'
-                        : 'Not detected'
-                    }
-                    score={
-                      view.qrNearBilling
-                        ? 100
-                        : 0
-                    }
-                    description={
-                      view.qrNearBilling
-                        ? 'QR placement is close to the billing area'
-                        : 'QR should be moved closer to billing'
-                    }
-                    status={
-                      view.qrNearBilling
-                        ? 'pass'
-                        : 'fail'
-                    }
-                  />
-
-                  <AIFinding
-                    title="Soundbox"
-                    value={
-                      view.soundboxPresent
-                        ? view.soundboxVisible
-                          ? 'Visible'
-                          : 'Detected'
-                        : 'Not detected'
-                    }
-                    score={
-                      view.soundboxPresent
-                        ? 100
-                        : 0
-                    }
-                    description={
-                      view.soundboxPresent
-                        ? 'Paytm Soundbox detected'
-                        : 'Soundbox was not detected'
-                    }
-                    status={
-                      view.soundboxPresent
-                        ? 'pass'
-                        : 'fail'
-                    }
-                  />
-
-                  <AIFinding
-                    title="Paytm counter prominence"
-                    value={
-                      view.paytmDominance
-                        ? 'Strong'
-                        : 'Low'
-                    }
-                    score={
-                      view.paytmDominance
-                        ? 100
-                        : 0
-                    }
-                    description={
-                      view.competitorDetected
-                        ? `${view.competitor} has stronger counter visibility`
-                        : 'No stronger competitor detected'
-                    }
-                    status={
-                      view.paytmDominance
-                        ? 'pass'
-                        : 'fail'
-                    }
-                  />
-
-                </div>
-
-                {/* ------------------------------------------------------ */}
-                {/* STRUCTURED OUTPUT                                       */}
-                {/* ------------------------------------------------------ */}
-
-                <div className="audit-json">
-
-                  <div className="audit-json-header">
-
-                    <span>
-                      VISION AI · STRUCTURED OUTPUT
-                    </span>
-
-                    <button
-                      onClick={copyPayload}
-                      title="Copy structured audit payload"
-                    >
-                      {copied ? (
-                        <CheckCircle2 size={15} />
-                      ) : (
-                        <Copy size={15} />
-                      )}
-                    </button>
-
-                  </div>
-
-                  <pre>
-{JSON.stringify(
-  {
-    visit_id: view.visitId,
-    paytm_qr_present: view.qrVisibility > 0,
-    qr_visibility_score: Math.round(
-      view.qrVisibility,
-    ),
-    qr_near_billing: view.qrNearBilling,
-    soundbox_present: view.soundboxPresent,
-    soundbox_visible: view.soundboxVisible,
-    paytm_dominance: view.paytmDominance,
-    competitor_detected:
-      view.competitorDetected,
-    competitor_name:
-      view.competitorDetected
-        ? view.competitor
-        : null,
-    competitor_dominance:
-      view.competitorLevel,
-    recommended_action:
-      view.recommendation,
-    confidence:
-      Number(view.confidence / 100).toFixed(2),
-  },
-  null,
-  2,
-)}
-                  </pre>
-
-                </div>
-
-              </div>
-
-            </section>
-
-            {/* ---------------------------------------------------------- */}
-            {/* VISIT CONTEXT                                                */}
-            {/* ---------------------------------------------------------- */}
-
-            <div className="audit-context-grid">
-
-              <div className="audit-context-item">
-
-                <span>
-                  MERCHANT
-                </span>
-
-                <strong>
-                  {view.merchantName}
-                </strong>
-
-              </div>
-
-              <div className="audit-context-item">
-
-                <span>
-                  FIELD EXECUTIVE
-                </span>
-
-                <strong>
-                  {view.fse}
-                </strong>
-
-              </div>
-
-              <div className="audit-context-item">
-
-                <span>
-                  LOCATION
-                </span>
-
-                <strong>
-                  {view.location}
-                </strong>
-
-              </div>
-
-              <div className="audit-context-item">
-
-                <span>
-                  AUDIT ID
-                </span>
-
-                <strong>
-                  {view.visitId}
-                </strong>
-
-              </div>
-
-            </div>
-
-          </div>
-
-          {/* ============================================================ */}
-          {/* RIGHT                                                          */}
-          {/* ============================================================ */}
-
-          <aside className="audit-side">
-
-            {/* ---------------------------------------------------------- */}
-            {/* EVIDENCE GATE                                                */}
-            {/* ---------------------------------------------------------- */}
-
-            <section className="card audit-side-card">
-
-              <div className="audit-card-heading">
-
-                <div>
-                  <div className="eyebrow">
-                    EVIDENCE GATE
-                  </div>
-
-                  <h2>
-                    Visit Verification
-                  </h2>
-                </div>
-
-                <ShieldCheck
-                  size={18}
-                  color="#1F5BFF"
-                />
-
-              </div>
-
-              <div className="audit-evidence-list">
-
-                <EvidenceSignal
-                  icon={MapPin}
-                  label="GPS location"
-                  value={
-                    view.gps?.verified
-                      ? 'Verified'
-                      : 'Unavailable'
-                  }
-                  detail={
-                    view.geofence?.distance
-                      ? `${view.geofence.distance} from merchant`
-                      : view.geofence?.detail
-                  }
-                  status={
-                    view.gps?.verified
-                      ? 'verified'
-                      : 'pending'
-                  }
-                />
-
-                <EvidenceSignal
-                  icon={Clock3}
-                  label="Timestamp"
-                  value={
-                    view.timestamp
-                      ? 'Captured'
-                      : 'Unavailable'
-                  }
-                  detail={view.timestamp}
-                  status={
-                    view.timestamp
-                      ? 'verified'
-                      : 'pending'
-                  }
-                />
-
-                <EvidenceSignal
-                  icon={Camera}
-                  label="Image evidence"
-                  value={
-                    view.imageEvidence?.captured
-                      ? 'Captured'
-                      : view.image
-                        ? 'Available'
-                        : 'Unavailable'
-                  }
-                  detail={
-                    view.imageEvidence?.detail ||
-                    'Visit image attached to audit'
-                  }
-                  status={
-                    view.image
-                      ? 'verified'
-                      : 'pending'
-                  }
-                />
-
-                <EvidenceSignal
-                  icon={Fingerprint}
-                  label="Image fingerprint"
-                  value={
-                    view.imageHash
-                      ? 'Recorded'
-                      : 'Unavailable'
-                  }
-                  detail={
-                    view.imageHash ||
-                    'No image fingerprint returned'
-                  }
-                  status={
-                    view.imageHash
-                      ? 'verified'
-                      : 'pending'
-                  }
-                />
-
-                <EvidenceSignal
-                  icon={UserCheck}
-                  label="Merchant context"
-                  value={
-                    view.merchantMatch?.verified
-                      ? 'Matched'
-                      : 'Review'
-                  }
-                  detail={
-                    view.merchantMatch?.detail ||
-                    'Merchant context supplied with visit'
-                  }
-                  status={
-                    view.merchantMatch?.verified
-                      ? 'verified'
-                      : 'pending'
-                  }
-                />
-
-              </div>
-
-            </section>
-
-            {/* ---------------------------------------------------------- */}
-            {/* AI RECOMMENDATION                                            */}
-            {/* ---------------------------------------------------------- */}
-
-            <section className="card recommendation-card">
-
-              <div className="recommendation-icon">
-                <Zap size={18} />
-              </div>
-
-              <div className="eyebrow">
-                AI RECOMMENDATION
-              </div>
-
-              <h3>
-                {view.recommendation}
-              </h3>
-
-              <p className="mu sm">
-                Recommendation generated from the
-                counter-level Vision AI findings.
-              </p>
-
-              <div className="recommendation-meta">
-                <Target size={13} />
-                Evidence → Finding → Recommended action
-              </div>
-
-            </section>
-
-            {/* ---------------------------------------------------------- */}
-            {/* DECISION / EXECUTION                                        */}
-            {/* ---------------------------------------------------------- */}
-
-            <section className="card audit-side-card">
-
-              <div className="audit-card-heading">
-
-                <div>
-                  <div className="eyebrow">
-                    DECISION ENGINE
-                  </div>
-
-                  <h2>
-                    Action Pipeline
-                  </h2>
-                </div>
-
-                <Zap
-                  size={18}
-                  color="#1F5BFF"
-                />
-
-              </div>
-
-              <div className="audit-evidence-list">
-
-                <EvidenceSignal
-                  icon={Target}
-                  label="AI decision"
-                  value={
-                    view.aiDecision ||
-                    (actionRequired
-                      ? 'Intervention required'
-                      : 'No intervention required')
-                  }
-                  detail={`Based on audit score ${Math.round(
-                    view.score,
-                  )}/100`}
-                  status="verified"
-                />
-
-                <EvidenceSignal
-                  icon={Sparkles}
-                  label="Sarvam guidance"
-                  value={
-                    view.sarvamStatus ||
-                    'Not executed'
-                  }
-                  detail="Merchant-language guidance layer"
-                  status={
-                    view.sarvamStatus
-                      ? 'verified'
-                      : 'pending'
-                  }
-                />
-
-                <EvidenceSignal
-                  icon={Zap}
-                  label="n8n automation"
-                  value={
-                    view.n8nStatus ||
-                    'Not executed'
-                  }
-                  detail="Workflow orchestration status"
-                  status={
-                    view.n8nStatus
-                      ? 'verified'
-                      : 'pending'
-                  }
-                />
-
-              </div>
-
-              <Link
-                to={`/visits/${view.visitId}`}
-                className="btn p"
-                style={{
-                  width: '100%',
-                  marginTop: 12,
-                  justifyContent: 'center',
-                }}
-              >
-                Continue to Visit Evidence
-                <ArrowRight size={14} />
-              </Link>
-
-            </section>
-
-            {/* ---------------------------------------------------------- */}
-            {/* INTEGRITY                                                    */}
-            {/* ---------------------------------------------------------- */}
-
-            <section className="card audit-side-card">
-
-              <div className="eyebrow">
-                EVIDENCE INTEGRITY
-              </div>
-
-              <h3 style={{ margin: '5px 0 8px' }}>
-                Evidence fingerprint
-              </h3>
-
-              <p
-                className="mu sm"
-                style={{
-                  lineHeight: 1.5,
-                  marginBottom: 12,
-                }}
-              >
-                The visit image fingerprint can be used
-                to detect previously submitted evidence.
-              </p>
-
-              <div
-                style={{
-                  padding: 11,
-                  borderRadius: 10,
-                  background: '#f4f7ff',
-                  border: '1px solid #dde7fb',
-                  fontFamily:
-                    'ui-monospace, SFMono-Regular, Menlo, monospace',
-                  fontSize: 10,
-                  wordBreak: 'break-all',
-                  color: '#52688f',
-                }}
-              >
-                {view.imageHash ||
-                  'Fingerprint unavailable'}
-              </div>
-
-            </section>
-
-          </aside>
-
-        </div>
-      </div>
-    </Layout>
-  )
-}
+      `
