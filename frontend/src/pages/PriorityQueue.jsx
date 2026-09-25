@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronDown, Navigation, Search, Route, ArrowRight, SlidersHorizontal, Info, X } from 'lucide-react'
 import Layout from '../components/Layout'
 import { PriorityBadge, ScoreRing } from '../components/ui'
@@ -169,9 +169,13 @@ export default function PriorityQueue() {
   const [scoreModalOpen, setScoreModalOpen] = useState(false)
   const [queue, setQueue] = useState(null)
   const [error, setError] = useState(null)
-  const [fse, setFse] = useState(getCurrentFse())
+  const [searchParams] = useSearchParams()
+  // `?fse=<id>` (the manager's team table links here) shows that rep's queue; otherwise the signed-in rep's.
+  const fseId = Number(searchParams.get('fse')) || getCurrentFseId()
+  const [listedFse, setListedFse] = useState(null)
+  const storedFse = getCurrentFse()
+  const fse = storedFse?.id === fseId ? storedFse : listedFse?.id === fseId ? listedFse : null
   const pos = usePosition()
-  const fseId = getCurrentFseId()
 
   const seq = useRef(0)
 
@@ -196,10 +200,10 @@ export default function PriorityQueue() {
     load(null)
   }, [load])
   useEffect(() => {
-    // The name is only for the heading; the session has it once somebody logged in.
-    if (getCurrentFse()) return
+    // The name is only for the heading; the session has it once somebody logged in (unless ?fse= names another rep).
+    if (getCurrentFse()?.id === fseId) return
     listFse()
-      .then((all) => setFse(all.find((f) => f.id === fseId) || null))
+      .then((all) => setListedFse(all.find((f) => f.id === fseId) || null))
       .catch(() => {})
   }, [fseId])
   useEffect(() => {
