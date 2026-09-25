@@ -1,8 +1,13 @@
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# SIGHTPAY_ENV_FILE="" disables .env loading entirely (the test suite does this so live keys never leak into tests).
+ENV_FILE = os.environ.get("SIGHTPAY_ENV_FILE", ".env") or None
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
     database_url: str = "sqlite:///./sightpay.db"
     upload_dir: str = "./storage/uploads"
