@@ -52,7 +52,7 @@ memory.
 
       LLM_PROVIDER=ollama
       LLM_MODEL=llama3.1:8b
-      LLM_ENDPOINT=http://localhost:11434/v1
+      LLM_ENDPOINT=http://localhost:11434
       LLM_API_KEY=ollama
       EMBEDDING_PROVIDER=ollama
       EMBEDDING_MODEL=nomic-embed-text:latest
