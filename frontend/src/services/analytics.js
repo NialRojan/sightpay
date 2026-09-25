@@ -9,5 +9,5 @@ export const getDashboard = () => get('/dashboard')
 //   by_action{action: {label, merchants, avg_change_pct}}, merchants[{merchant_id, merchant_name, action, intervention_date, change_pct}]}
 export const getPortfolioImpact = () => get('/analytics/impact')
 
-// GET /health -> {status, vision_provider, anthropic_key, n8n, memory, whatsapp} (which providers are live)
+// GET /health -> {status, vision_provider, anthropic_key, n8n, memory, whatsapp, sarvam, twilio} (which providers are live)
 export const getSystemHealth = () => get('/health')

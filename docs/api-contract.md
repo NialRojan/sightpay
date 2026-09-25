@@ -504,7 +504,9 @@ All `/fse/{id}/...` endpoints return **404 for an unknown FSE**. "Visited" below
 - `GET /visits?fse_id=&merchant_id=&limit=` · `GET /fraud/flagged` · `GET /fraud/{visit_id}` · `GET /audit/{visit_id}`
 - `POST /audit/analyze-image` (multipart photo) → `{quality, audit, provider}` (stateless try-it; same 413/415/422 rules as `POST /visits`)
 - `GET /incentives?fse_id=` → `{total_inr, items[]}` · `GET /transactions?merchant_id=&days=30`
-- `GET /health` → which providers are live (`vision_provider`, `anthropic_key` (a key is configured), `n8n`, `memory`, `whatsapp`)
+- `GET /health` → which providers are live (`vision_provider`, `anthropic_key` (a key is configured), `n8n`, `memory`, `whatsapp`,
+  `sarvam` (a `SARVAM_API_KEY` is configured), `twilio` (both `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are set; messages
+  go through Twilio only when `whatsapp` is also `"twilio"`))
 
 ## Webhooks (Twilio-facing)
 

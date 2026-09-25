@@ -211,8 +211,8 @@ export default function Manager() {
         ['Vision AI', health.vision_provider, health.vision_provider !== 'fixture', `Anthropic key ${health.anthropic_key ? 'configured' : 'not set'}`],
         ['n8n Workflow Engine', health.n8n ? 'n8n webhook' : 'Inline pipeline', !!health.n8n, health.n8n ? 'Visits run through n8n' : 'n8n not configured: backend runs the steps'],
         ['Merchant Memory', health.memory, health.memory === 'cognee', health.memory === 'cognee' ? 'Cognee graph (SQL fallback)' : 'SQL memory backend'],
-        ['WhatsApp', health.whatsapp, health.whatsapp === 'twilio', health.whatsapp === 'twilio' ? 'Twilio messages' : 'Messages logged, not sent'],
-        ['Sarvam (voice / translation)', 'not reported', false, '/api/health has no Sarvam field; without a key guidance uses templates'],
+        ['WhatsApp', health.whatsapp, health.whatsapp === 'twilio' && !!health.twilio, health.whatsapp === 'twilio' && health.twilio ? 'Twilio messages' : `Messages logged, not sent · Twilio credentials ${health.twilio ? 'configured' : 'not set'}`],
+        ['Sarvam (voice / translation)', health.sarvam ? 'configured' : 'not set', !!health.sarvam, health.sarvam ? 'Translated guidance, voice notes and voice assistant' : 'No key: guidance uses templates, no voice notes'],
         ['Backend API', health.status, health.status === 'ok', 'GET /api/health'],
       ]
     : []

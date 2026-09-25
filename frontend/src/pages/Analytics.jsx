@@ -890,10 +890,10 @@ export default function Analytics() {
         ['Vision provider', health.vision_provider, health.vision_provider === 'fixture' ? 'Fixture audits (demo)' : 'Live vision model'],
         ['Anthropic key', health.anthropic_key ? 'Present' : 'Not set', 'Needed for Claude vision'],
         ['Memory backend', health.memory, health.memory === 'cognee' ? 'Cognee graph, SQL fallback' : 'SQL merchant memory'],
-        ['WhatsApp mode', health.whatsapp, health.whatsapp === 'twilio' ? 'Sent through Twilio' : 'Logged, not sent'],
+        ['WhatsApp mode', health.whatsapp, health.whatsapp === 'twilio' && health.twilio ? 'Sent through Twilio' : `Logged, not sent · Twilio ${health.twilio ? 'configured' : 'not set'}`],
         ['n8n', health.n8n ? 'Configured' : 'Off', health.n8n ? 'Pipeline runs through n8n' : 'Pipeline runs inline'],
         ['API status', health.status, 'GET /api/health'],
-        ['Sarvam key', 'Not reported', '/api/health has no Sarvam field'],
+        ['Sarvam key', health.sarvam ? 'Present' : 'Not set', health.sarvam ? 'Translation, voice notes, voice assistant' : 'Templates, no voice notes'],
         ['Dashboard generated', dash?.generated_at ? fmtDate(dash.generated_at) : '—', 'GET /dashboard'],
       ]
     : []
