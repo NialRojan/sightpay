@@ -147,3 +147,22 @@ def test_pool_submit_failure_falls_back_to_sql(db, monkeypatch):
     monkeypatch.setattr(cognee_memory, "_pool", BrokenPool())
     m = _ramesh(db)
     assert CogneeMemory(adapter=FakeAdapter()).get_context(db, m.id).source == "sql_fallback"
+
+
+def test_import_cognee_exports_dotenv_without_overriding_real_env(tmp_path, monkeypatch):
+    """Cognee reads LLM_*/EMBEDDING_* from os.environ, so backend/.env must be exported before importing it."""
+    import os
+
+    from app.services.memory import cognee_memory
+
+    (tmp_path / ".env").write_text("SIGHTPAY_TEST_EMBEDDING_PROVIDER=ollama\nSIGHTPAY_TEST_LLM_MODEL=from_dotenv\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SIGHTPAY_TEST_LLM_MODEL", "from_shell")
+    fake = types.ModuleType("cognee")
+    monkeypatch.setitem(sys.modules, "cognee", fake)
+    try:
+        assert cognee_memory._import_cognee() is fake
+        assert os.environ["SIGHTPAY_TEST_EMBEDDING_PROVIDER"] == "ollama"
+        assert os.environ["SIGHTPAY_TEST_LLM_MODEL"] == "from_shell"
+    finally:
+        os.environ.pop("SIGHTPAY_TEST_EMBEDDING_PROVIDER", None)
