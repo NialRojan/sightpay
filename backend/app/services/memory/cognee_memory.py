@@ -4,6 +4,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 
+from dotenv import find_dotenv, load_dotenv
 from sqlalchemy.orm import Session
 
 from app import models
@@ -45,11 +46,24 @@ def flatten_search_results(results) -> str:
     return "\n".join(parts)
 
 
+def _import_cognee():
+    """Import cognee with backend/.env exported first.
+
+    Cognee reads its provider settings (LLM_*, EMBEDDING_*, ...) from os.environ at import time, but pydantic-settings
+    only loads .env into our own Settings, so without this Cognee silently falls back to its OpenAI defaults.
+    Real environment variables still win (override=False).
+    """
+    load_dotenv(find_dotenv(usecwd=True), override=False)
+    import cognee
+
+    return cognee
+
+
 class CogneeAdapter:
     """The only place that touches the cognee library (API checked against cognee 1.6.1)."""
 
     def add(self, text: str, dataset: str) -> None:
-        import cognee
+        cognee = _import_cognee()
 
         async def _run():
             await cognee.add(text, dataset_name=dataset)
@@ -58,7 +72,7 @@ class CogneeAdapter:
         asyncio.run(_run())
 
     def search(self, query: str, dataset: str) -> str:
-        import cognee
+        cognee = _import_cognee()
         from cognee import SearchType
 
         async def _run():

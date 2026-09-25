@@ -43,8 +43,25 @@ memory.
 
   Cognee needs its own LLM and embedding provider (for example `LLM_API_KEY`, plus `LLM_PROVIDER`/`LLM_MODEL` and the
   `EMBEDDING_*` settings if you do not use its OpenAI defaults), set in the environment as described in Cognee's docs.
+  They can go in `backend/.env`: the backend exports that file before importing Cognee (real environment variables win).
   These are Cognee's settings, not SightPay's. Without them `cognify` and search fail, and every lookup silently
   becomes `sql_fallback`: check the `merchant_context` step's `data.source` to confirm Cognee is actually answering.
+
+  Free, local option (no API key): install [Ollama](https://ollama.com), `ollama pull llama3.1:8b` and
+  `ollama pull nomic-embed-text`, then add to `backend/.env`:
+
+      LLM_PROVIDER=ollama
+      LLM_MODEL=llama3.1:8b
+      LLM_ENDPOINT=http://localhost:11434/v1
+      LLM_API_KEY=ollama
+      EMBEDDING_PROVIDER=ollama
+      EMBEDDING_MODEL=nomic-embed-text:latest
+      EMBEDDING_ENDPOINT=http://localhost:11434/api/embeddings
+      EMBEDDING_DIMENSIONS=768
+      HUGGINGFACE_TOKENIZER=nomic-ai/nomic-embed-text-v1.5
+      COGNEE_TIMEOUT_S=20
+
+  Local models are slower, hence the longer timeout.
 
 Demo: `scripts/demo_visit.sh demo_photos/counter_bad.jpg` → non-compliant → Hindi WhatsApp guidance.
 Offline safety net: VISION_PROVIDER=fixture + photos pinned via scripts/register_fixture.py; unset N8N_WEBHOOK_URL to run inline.
