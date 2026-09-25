@@ -1,46 +1,95 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import {
-  ArrowRight,
-  Brain,
-  CheckCircle2,
-  Clock,
-  Compass,
-  MapPin,
-  Navigation,
-  Plus,
-  ShieldCheck,
-  Sparkles,
-  TrendingDown,
-  TrendingUp,
-  UserPlus,
-  Zap,
-} from 'lucide-react'
+import { AlertTriangle, ArrowRight, Brain, CheckCircle2, MapPin, Navigation, Sparkles } from 'lucide-react'
 import Layout from '../components/Layout'
-import { PriorityBadge, ScoreRing, StatCard } from '../components/ui'
-import { getMerchant, getMerchantImpact, getMerchantMemory } from '../services/merchants'
-import { memories as fallbackMemories, merchants } from '../data/demoData'
+import { StatCard } from '../components/ui'
+import ImpactChart from '../components/rep/ImpactChart'
+import { errText, haversine, usePosition } from '../components/rep/repData'
+import { getMerchantDetail, getMerchantImpact } from '../services/merchants'
+import { getVisitAudit } from '../services/audits'
+import { mediaUrl } from '../services/api'
+import { ACTION_LABEL, DECISION_LABEL, STATUS_LABEL, fmtDate, fmtKm, fmtPct, fmtTime } from '../services/format'
+
+const SOURCE_LABEL = { sql: 'Memory: SQL', cognee: 'Memory: Cognee', sql_fallback: 'Memory: SQL (Cognee fallback)' }
+const DOMINANCE = { none: 'None', low: 'LOW', medium: 'MEDIUM', high: 'HIGH' }
+
+function ErrorCard({ title, err, onRetry }) {
+  return (
+    <div className="card" style={{ padding: 24 }}>
+      <h2>{title}</h2>
+      <p className="mu">{errText(err)}</p>
+      {onRetry && <button className="btn" style={{ marginTop: 10 }} onClick={onRetry}>Retry</button>}
+    </div>
+  )
+}
 
 export default function MerchantDetail() {
-  const { id = 'm1' } = useParams()
+  const { id } = useParams()
   const nav = useNavigate()
-  const [m, setM] = useState(null)
-  const [impact, setImpact] = useState(null)
-  const [memory, setMemory] = useState(fallbackMemories)
+  const pos = usePosition()
+  // Results are stored with the request key they answer, so a stale response never shows under another id and
+  // "loading" is simply "no result for the current key yet".
+  const [detailRes, setDetailRes] = useState(null) // {key, data?, error?}
+  const [reload, setReload] = useState(0)
+  const [pick, setPick] = useState({ id: null, interventionId: null }) // chosen intervention for this merchant
+  const [impactRes, setImpactRes] = useState(null) // {key, data?, error?}
+  const [auditRes, setAuditRes] = useState(null) // {key, audit, error?}
+  const [showAll, setShowAll] = useState(false)
+
+  const detailKey = `${id}:${reload}`
+  const interventionId = pick.id === id ? pick.interventionId : null
+  const impactKey = `${id}:${interventionId ?? ''}`
 
   useEffect(() => {
-    Promise.all([
-      getMerchant(id),
-      getMerchantImpact(id),
-      getMerchantMemory(id),
-    ]).then(([a, b, c]) => {
-      setM(a || merchants[0])
-      setImpact(b)
-      setMemory(c || fallbackMemories)
-    })
-  }, [id])
+    let alive = true
+    getMerchantDetail(id)
+      .then((data) => {
+        if (!alive) return
+        setDetailRes({ key: detailKey, data })
+        const latest = data.recent_visits?.[0]
+        if (!latest) return setAuditRes({ key: detailKey, audit: null })
+        // Soundbox / competitor / confidence live on the latest visit's audit, not on the merchant payload.
+        getVisitAudit(latest.id)
+          .then((audit) => alive && setAuditRes({ key: detailKey, audit }))
+          .catch((e) => alive && setAuditRes({ key: detailKey, audit: null, error: e?.status === 404 ? null : e }))
+      })
+      .catch((e) => alive && setDetailRes({ key: detailKey, error: e }))
+    return () => {
+      alive = false
+    }
+  }, [id, detailKey])
 
-  if (!m) {
+  useEffect(() => {
+    let alive = true
+    getMerchantImpact(id, interventionId ?? undefined)
+      .then((data) => alive && setImpactRes({ key: impactKey, data }))
+      .catch((e) => alive && setImpactRes({ key: impactKey, error: e }))
+    return () => {
+      alive = false
+    }
+  }, [id, interventionId, impactKey])
+
+  const current = detailRes?.key === detailKey ? detailRes : null
+  const d = current?.data || null
+  const error = current?.error || null
+  const impact = impactRes?.key === impactKey ? impactRes.data || null : null
+  const impactErr = impactRes?.key === impactKey ? impactRes.error || null : null
+  const audit = auditRes?.key === detailKey ? auditRes.audit : undefined // undefined = loading, null = none
+  const auditErr = auditRes?.key === detailKey ? auditRes.error || null : null
+  const setInterventionId = (ivId) => setPick({ id, interventionId: ivId })
+  const loadDetail = () => setReload((n) => n + 1)
+
+  if (error) {
+    return (
+      <Layout crumb="Merchant 360">
+        <div className="pad">
+          <ErrorCard title={error.status === 404 ? 'Merchant not found' : 'Unable to load this merchant'} err={error} onRetry={loadDetail} />
+        </div>
+      </Layout>
+    )
+  }
+
+  if (!d) {
     return (
       <Layout crumb="Merchant 360">
         <div className="pad mu">Loading merchant intelligence...</div>
@@ -48,7 +97,20 @@ export default function MerchantDetail() {
     )
   }
 
-  const visitId = id === 'm1' ? 'SP-10482' : `SP-${id.toUpperCase()}`
+  const m = d.merchant
+  const ctx = d.context || {}
+  const visits = d.recent_visits || []
+  const interventions = d.interventions || []
+  const latestVisit = visits[0]
+  const latestIv = interventions[0]
+  const distance = pos ? haversine(pos, m) : null
+  const trend = ctx.transaction_trend_pct
+  const scores = (ctx.previous_scores || []).slice().reverse() // oldest → newest
+  const shownVisits = showAll ? visits : visits.slice(0, 5)
+  const nextAction = audit?.recommended_action && audit.recommended_action !== 'none'
+    ? ACTION_LABEL[audit.recommended_action]
+    : latestIv?.issue || null
+  const startVisit = () => nav(`/fse/mobile?merchant=${m.id}`)
 
   return (
     <Layout crumb={`Merchant / ${m.name}`}>
@@ -65,96 +127,138 @@ export default function MerchantDetail() {
           <div>
             <div className="status-line">
               <span className="pill ev">MERCHANT 360</span>
-              <span className="status-dot-lime" /> ACTIVE MEMORY SYNCED
+              <span className="status-dot-lime" /> {(SOURCE_LABEL[ctx.source] || 'Memory').toUpperCase()}
             </div>
             <h1 style={{ marginTop: 6 }}>{m.name}</h1>
             <p className="mu">
-              <MapPin size={13} color="#B7FF3C" /> {m.location} · {m.km} km away · FSE: Aarav Sharma
+              <MapPin size={13} color="#B7FF3C" /> {m.address || '—'}
+              {distance != null ? ` · ${fmtKm(distance)} away` : ''} · {m.category || '—'} · Owner: {m.owner_name || '—'}
+              {m.phone ? ` (${m.phone})` : ''} · {m.language || '—'} · FSE: {m.assigned_fse_name || 'Unassigned'}
             </p>
           </div>
           <div className="head-actions">
-            <button className="btn" onClick={() => nav(`/visits/${visitId}`)}>
+            <button className="btn" onClick={startVisit}>
               <Navigation size={15} /> Start Visit / Audit
             </button>
-            <button className="btn p" onClick={() => nav(`/visits/${visitId}`)}>
-              Execute Recommended Action <ArrowRight size={15} />
+            <button
+              className="btn p"
+              disabled={!latestVisit}
+              title={latestVisit ? `Visit #${latestVisit.id}` : 'No visit yet'}
+              onClick={() => latestVisit && nav(`/visits/${latestVisit.id}`)}
+            >
+              Open Latest Visit <ArrowRight size={15} />
             </button>
           </div>
         </div>
 
+        {d.open_escalations?.length > 0 && (
+          <div className="card hero-impact">
+            <div>
+              <span className="pill HIGH"><AlertTriangle size={11} /> OPEN ESCALATION</span>
+              {d.open_escalations.map((e) => (
+                <p className="sm" key={e.id} style={{ marginTop: 6 }}>
+                  Visit #{e.visit_id}: {e.reason} · raised {fmtDate(e.created_at)}
+                </p>
+              ))}
+            </div>
+            <button className="btn" onClick={() => nav('/manager')}>Manager review <ArrowRight size={15} /></button>
+          </div>
+        )}
+
         {/* Health Stat Cards */}
         <div className="g4 health-stats">
-          <StatCard label="QR Visibility Score" value={`${m.qr} / 100`} note="Obstructed / Needs repositioning" up={false} />
-          <StatCard label="Soundbox Status" value={`${m.soundbox || 82} / 100`} note="Healthy signal" up={true} />
-          <StatCard label="Transaction Trend" value={`${m.trend}%`} note="vs 14-day baseline" up={m.trend >= 0} />
-          <StatCard label="Competitor Risk" value={m.competitor || 'PhonePe'} note={`${m.comp} presence`} up={false} />
+          <StatCard
+            label="QR Visibility Score"
+            value={m.latest_score == null ? '—' : `${m.latest_score} / 100`}
+            note={m.latest_decision ? DECISION_LABEL[m.latest_decision] : 'Not audited yet'}
+            up={m.latest_decision === 'compliant'}
+          />
+          <StatCard
+            label="Soundbox Status"
+            value={audit == null ? '—' : audit.soundbox_visible ? 'Visible' : 'Not visible'}
+            note={audit === undefined ? 'Loading latest audit…' : audit ? `Latest audit · visit #${latestVisit?.id}` : 'No audit yet'}
+            up={!!audit?.soundbox_visible}
+          />
+          <StatCard
+            label="Observed Change"
+            value={fmtPct(trend)}
+            note={trend == null ? 'No measurable intervention yet' : 'Daily transactions, 14 d before vs after'}
+            up={trend != null && trend >= 0}
+          />
+          <StatCard
+            label="Competitor Risk"
+            value={audit?.competitor || (audit ? 'None seen' : '—')}
+            note={audit ? `${DOMINANCE[audit.competitor_dominance] || audit.competitor_dominance || '—'} presence` : 'No audit yet'}
+            up={audit ? !audit.competitor || audit.competitor_dominance === 'none' || audit.competitor_dominance === 'low' : false}
+          />
         </div>
+        {auditErr && <p className="mu sm">Latest audit could not be loaded: {errText(auditErr)}</p>}
 
         {/* Chart & AI Summary */}
         <div className="g2 merchant-main">
           <section className="card chart-panel">
             <div className="row">
               <div>
-                <h2>Merchant Health Signals</h2>
-                <span className="mu sm">14-day trend across visits and counter audits</span>
+                <h2>Transactions Before / After Guidance</h2>
+                <span className="mu sm">Observed daily transaction value around the intervention date</span>
               </div>
-              <span className="pill ev">Live Feed</span>
+              <span className="pill ev">Observed change</span>
             </div>
-
-            <div className="chart-placeholder">
-              <svg className="big-chart" viewBox="0 0 600 200" preserveAspectRatio="none">
-                <line x1="0" y1="170" x2="600" y2="170" stroke="rgba(245,247,244,0.06)" />
-                <line x1="0" y1="110" x2="600" y2="110" stroke="rgba(245,247,244,0.06)" />
-                <line x1="0" y1="50" x2="600" y2="50" stroke="rgba(245,247,244,0.06)" />
-
-                {/* Lines */}
-                <polyline points="0,80 100,92 200,105 300,125 400,140 500,155 600,165" fill="none" stroke="#B7FF3C" strokeWidth="3" />
-                <polyline points="0,120 100,112 200,118 300,126 400,135 500,140 600,142" fill="none" stroke="#8BE6FF" strokeWidth="2.5" />
-                <polyline points="0,160 100,150 200,135 300,110 400,90 500,70 600,50" fill="none" stroke="#FF6B5F" strokeWidth="2" strokeDasharray="4 4" />
-              </svg>
-              <div className="chart-legend">
-                <span><i className="l-lime" /> QR Visibility Score</span>
-                <span><i className="l-sky" /> Transaction Volume</span>
-                <span><i className="l-red" /> Competitor Dominance</span>
+            {impactErr ? (
+              <p className="mu sm" style={{ marginTop: 14 }}>Impact could not be loaded: {errText(impactErr)}</p>
+            ) : impact ? (
+              <ImpactChart data={impact} />
+            ) : (
+              <p className="mu sm" style={{ marginTop: 14 }}>Loading impact…</p>
+            )}
+            {interventions.length > 1 && (
+              <div className="summary-tags" style={{ marginTop: 10 }}>
+                <span className="mu xs" style={{ background: 'none', border: 0, color: 'var(--ink2)' }}>Measure:</span>
+                <button className={`filter-chip ${interventionId == null ? 'on' : ''}`} onClick={() => setInterventionId(null)}>
+                  Latest measurable
+                </button>
+                {interventions.map((iv) => (
+                  <button key={iv.id} className={`filter-chip ${interventionId === iv.id ? 'on' : ''}`} onClick={() => setInterventionId(iv.id)}>
+                    {fmtDate(iv.created_at)} · {iv.issue || ACTION_LABEL[iv.action]}
+                  </button>
+                ))}
               </div>
-            </div>
+            )}
           </section>
 
           <section className="card ai-summary">
             <div className="row">
               <div>
-                <span className="pill ev">COGNEE MEMORY RECALL</span>
+                <span className="pill ev">{(SOURCE_LABEL[ctx.source] || 'MEMORY RECALL').toUpperCase()}</span>
                 <h2 style={{ marginTop: 4 }}>AI Executive Summary</h2>
               </div>
               <Sparkles size={18} color="#B7FF3C" />
             </div>
-            <p className="summary-text">
-              SightPay has identified persistent QR visibility obstruction across recent visits. PhonePe is currently the primary payment option presented on the main counter. Moving the Paytm QR closer to the billing terminal is estimated to yield an observed transaction uplift of <b>+19%</b>.
-            </p>
+            <p className="summary-text">{ctx.summary || 'No memory recorded for this merchant yet.'}</p>
             <div className="confidence-box">
               <div className="row">
-                <span className="mu sm">AI CONFIDENCE SCORE</span>
-                <b className="lime">93%</b>
+                <span className="mu sm">LATEST AUDIT CONFIDENCE</span>
+                <b className="lime">{audit?.confidence != null ? `${Math.round(audit.confidence * 100)}%` : '—'}</b>
               </div>
-              <div className="confidence-bar"><i style={{ width: '93%' }} /></div>
+              <div className="confidence-bar"><i style={{ width: `${audit?.confidence != null ? Math.round(audit.confidence * 100) : 0}%` }} /></div>
             </div>
             <div className="summary-tags">
-              <span>Persistent QR obstruction</span>
-              <span>PhonePe competitor risk</span>
-              <span>Hindi Sarvam nudge queued</span>
+              {(ctx.previous_issues || []).slice(0, 3).map((t, i) => <span key={`${t}-${i}`}>{t}</span>)}
+              {ctx.consecutive_non_compliant > 0 && <span>{ctx.consecutive_non_compliant} non-compliant in a row</span>}
+              {latestIv && <span>Last guidance in {latestIv.message_language || m.language}</span>}
             </div>
           </section>
         </div>
 
-        {/* COGNEE MERCHANT MEMORY GRAPH */}
+        {/* MERCHANT MEMORY GRAPH */}
         <section className="card memory-card">
           <div className="row">
             <div>
-              <span className="pill ev">CONTEXTUAL GRAPH DATABASE</span>
-              <h2 style={{ marginTop: 4 }}>Cognee Merchant Memory Graph</h2>
-              <p className="mu sm">Persistent contextual memory linking visits, issues, interventions, competitors and outcomes.</p>
+              <span className="pill ev">CONTEXTUAL MEMORY</span>
+              <h2 style={{ marginTop: 4 }}>Merchant Memory Graph</h2>
+              <p className="mu sm">Visits, issues, interventions, competitors and outcomes linked for this merchant.</p>
             </div>
-            <span className="mu sm">LAST MEMORY SYNC<br /><b className="lime">24 Sep 2026 · 09:42 AM</b></span>
+            <span className="mu sm">LAST VISIT IN MEMORY<br /><b className="lime">{ctx.last_visit_at ? `${fmtDate(ctx.last_visit_at)} · ${fmtTime(ctx.last_visit_at)}` : '—'}</b></span>
           </div>
 
           <div className="memory-graph-container">
@@ -162,45 +266,49 @@ export default function MerchantDetail() {
               <div className="m-center-node">
                 <Brain size={22} color="#FFFFFF" />
                 <b>{m.name}</b>
-                <span className="mu xs">Merchant ID: {m.id.toUpperCase()}</span>
+                <span className="mu xs">Merchant ID: {m.id}</span>
               </div>
 
               <div className="m-nodes-grid">
                 <div className="m-node n-visits">
                   <span className="n-tag">VISITS</span>
-                  <b>3 Completed</b>
-                  <span className="mu xs">Last: 24 Sep</span>
+                  <b>{visits.length} recorded</b>
+                  <span className="mu xs">Last: {m.last_visit_at ? fmtDate(m.last_visit_at) : 'never'}</span>
                 </div>
                 <div className="m-node n-issues">
                   <span className="n-tag red">ISSUES</span>
-                  <b>QR Obstruction</b>
-                  <span className="mu xs">Score: {m.qr}/100</span>
+                  <b>{ctx.previous_issues?.[0] || 'None recorded'}</b>
+                  <span className="mu xs">Scores: {scores.length ? scores.join(' → ') : '—'}</span>
                 </div>
                 <div className="m-node n-interventions">
                   <span className="n-tag lime">INTERVENTIONS</span>
-                  <b>QR Repositioning</b>
-                  <span className="mu xs">Sarvam Hindi sent</span>
+                  <b>{latestIv ? latestIv.issue || ACTION_LABEL[latestIv.action] : 'None yet'}</b>
+                  <span className="mu xs">{latestIv ? `${interventions.length} sent · ${latestIv.message_language}` : '—'}</span>
                 </div>
                 <div className="m-node n-competitors">
                   <span className="n-tag amb">COMPETITOR</span>
-                  <b>PhonePe HIGH</b>
-                  <span className="mu xs">Sticker on counter</span>
+                  <b>{audit?.competitor ? `${audit.competitor} ${DOMINANCE[audit.competitor_dominance] || ''}` : audit ? 'None seen' : '—'}</b>
+                  <span className="mu xs">{audit ? `Latest audit ${fmtDate(latestVisit?.received_at)}` : 'No audit yet'}</span>
                 </div>
                 <div className="m-node n-outcomes">
                   <span className="n-tag sky">OUTCOMES</span>
-                  <b>+19% Expected</b>
-                  <span className="mu xs">14-day window</span>
+                  <b>{trend == null ? 'Not measurable yet' : `${fmtPct(trend)} observed`}</b>
+                  <span className="mu xs">14-day windows</span>
                 </div>
               </div>
             </div>
 
             <div className="memory-events-list">
               <h4>Memory Stream</h4>
-              {memory.map((mem, idx) => (
-                <div className="memory-item" key={idx}>
+              {interventions.length === 0 && <span className="mu sm">No guidance sent yet.</span>}
+              {interventions.map((iv) => (
+                <div className="memory-item" key={iv.id}>
                   <CheckCircle2 size={14} color="#1F5BFF" />
-                  <span>{mem}</span>
-                  <span className="mu xs">{idx === 0 ? 'Today' : idx === 1 ? 'Today' : 'Previous Visit'}</span>
+                  <span className="grow">
+                    <b>{iv.issue || ACTION_LABEL[iv.action]}</b>: {iv.message_text}
+                    {iv.audio_url && <audio controls preload="none" src={mediaUrl(iv.audio_url)} style={{ display: 'block', height: 28, marginTop: 4 }} />}
+                  </span>
+                  <span className="mu xs">{fmtDate(iv.created_at)}</span>
                 </div>
               ))}
             </div>
@@ -214,7 +322,11 @@ export default function MerchantDetail() {
               <h2>Visit Audit History</h2>
               <span className="mu sm">Structured records saved to transactional database</span>
             </div>
-            <button className="btn">View All Records</button>
+            {visits.length > 5 && (
+              <button className="btn" onClick={() => setShowAll((v) => !v)}>
+                {showAll ? 'Show Latest 5' : `View All Records (${visits.length})`}
+              </button>
+            )}
           </div>
 
           <div className="data-table">
@@ -225,21 +337,20 @@ export default function MerchantDetail() {
               <span>QR SCORE</span>
               <span>AUTHENTICITY</span>
               <span>STATUS</span>
-              <span>ACTION</span>
+              <span>DECISION</span>
             </div>
-            {[
-              ['SP-10482', '24 Sep 2026', 'Aarav Sharma', '38 / 100', '94 / 100', 'Verified', 'Reposition Paytm QR'],
-              ['SP-10476', '20 Sep 2026', 'Aarav Sharma', '42 / 100', '91 / 100', 'Verified', 'Merchant Guidance'],
-              ['SP-10461', '15 Sep 2026', 'Aarav Sharma', '61 / 100', '96 / 100', 'Verified', 'Soundbox Check'],
-            ].map((r) => (
-              <div className="tr clickable" key={r[0]} onClick={() => nav(`/visits/${r[0]}`)}>
-                <span className="lime font-mono"><b>{r[0]}</b></span>
-                <span>{r[1]}</span>
-                <span>{r[2]}</span>
-                <td><span className="qrbar"><i style={{ width: r[3] }} /></span> {r[3]}</td>
-                <td><span className="lime">{r[4]}</span></td>
-                <td><span className="pill COMPLETED">{r[5]}</span></td>
-                <td><b>{r[6]}</b></td>
+            {visits.length === 0 && <div className="tr"><span className="mu">No visits yet</span></div>}
+            {shownVisits.map((v) => (
+              <div className="tr clickable" key={v.id} onClick={() => nav(`/visits/${v.id}`)}>
+                <span className="lime font-mono"><b>#{v.id}</b></span>
+                <span>{fmtDate(v.received_at)}</span>
+                <span>{v.fse_name}</span>
+                <span>
+                  {v.qr_visibility_score == null ? '—' : <><span className="qrbar"><i style={{ width: `${v.qr_visibility_score}%` }} /></span> {v.qr_visibility_score} / 100</>}
+                </span>
+                <span className="lime">{v.authenticity_score == null ? '—' : `${v.authenticity_score} / 100`}</span>
+                <span><span className="pill COMPLETED">{STATUS_LABEL[v.status] || v.status}</span></span>
+                <span><b>{v.decision ? DECISION_LABEL[v.decision] : '—'}</b></span>
               </div>
             ))}
           </div>
@@ -249,12 +360,14 @@ export default function MerchantDetail() {
         <div className="card hero-impact">
           <div>
             <span className="pill ev">RECOMMENDED NEXT ACTION</span>
-            <h2 style={{ marginTop: 6, color: '#1F5BFF' }}>Reposition Paytm QR & track observed change over 14 days</h2>
+            <h2 style={{ marginTop: 6, color: '#1F5BFF' }}>
+              {nextAction ? `${nextAction}: re-check on the next visit` : 'Audit the counter on the next visit'}
+            </h2>
             <p className="mu sm" style={{ marginTop: 4 }}>
-              The next audit will automatically compare counter visibility score and daily transaction behavior against this merchant memory.
+              The next audit is compared with this merchant memory, and any new guidance gets its own before/after window.
             </p>
           </div>
-          <button className="btn p" onClick={() => nav(`/visits/${visitId}`)}>
+          <button className="btn p" onClick={startVisit}>
             Start Visit Audit <ArrowRight size={16} />
           </button>
         </div>
@@ -317,5 +430,15 @@ const CSS = `
 .tr.th { font-size: 11px; font-weight: 700; color: var(--ink2); }
 .tr.clickable:hover { background: #161C1C; cursor: pointer; }
 
+.filter-chip { font-size: 11px; background: #EEF3FF; color: var(--lime); padding: 4px 10px; border-radius: 99px; border: 1px solid var(--line); cursor: pointer; }
+.filter-chip.on { background: var(--lime); color: #FFFFFF; border-color: var(--lime); }
+.pending-strip { margin: 10px 0 0; font-size: 12px; background: #F8FAFF; border: 1px solid var(--line); border-left: 3px solid var(--amb); border-radius: 12px; padding: 8px 12px; color: var(--ink); }
+.impact-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+.impact-stats > div { background: #F8FAFF; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+.impact-stats b { font-size: 18px; font-family: Sora; color: var(--ink); }
+.impact-stats b.lime { color: var(--lime); }
+.impact-stats b.red { color: var(--red); }
+.caveat { margin-top: 10px; line-height: 1.5; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .hero-impact { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; background: #111515; border: 1px solid var(--line-lime); }
 `

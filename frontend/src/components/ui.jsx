@@ -40,19 +40,23 @@ export const StatCard = ({ label, value, note, up, i = 0 }) => (
   </div>
 )
 
-export const ScoreRing = ({ value, size = 84 }) => {
+// `value` may be null (never audited): the ring stays empty and shows "—".
+// `max`/`unit` let callers show numbers that are not out of 100 (e.g. the queue priority, which can exceed 100).
+export const ScoreRing = ({ value, size = 84, max = 100, unit = '/100' }) => {
   const r = 34
   const c = 2 * Math.PI * r
+  const has = value !== null && value !== undefined && Number.isFinite(Number(value))
+  const frac = has ? Math.min(Math.max(Number(value) / max, 0), 1) : 0
   return (
     <div className="ring" style={{ width: size, height: size }}>
       <svg viewBox="0 0 80 80">
         <circle cx="40" cy="40" r={r} className="rb" />
         <circle
           cx="40" cy="40" r={r} className="rf" strokeDasharray={c}
-          style={{ '--c': c, '--o': c * (1 - value / 100) }} transform="rotate(-90 40 40)"
+          style={{ '--c': c, '--o': c * (1 - frac) }} transform="rotate(-90 40 40)"
         />
       </svg>
-      <div><b>{value}</b><span>/100</span></div>
+      <div><b>{has ? Math.round(Number(value)) : '—'}</b>{unit ? <span>{unit}</span> : null}</div>
     </div>
   )
 }
@@ -117,29 +121,45 @@ export const MapView = ({ points, done, total, priority }) => {
   )
 }
 
-export const PriorityTable = ({ rows }) => (
+// Rows: {id, name, pri, km, qr, trend}. km/qr/trend may be null ("—"). Optional: `trendLabel` renames the last
+// column and `m.trendText` fills it when there is no numeric trend; `onRowClick(m)` makes rows clickable.
+export const PriorityTable = ({ rows, trendLabel = 'Trend', onRowClick }) => (
   <table className="tbl">
     <thead>
-      <tr><th>Merchant</th><th>Priority</th><th>Distance</th><th>QR Score</th><th>Trend</th></tr>
+      <tr><th>Merchant</th><th>Priority</th><th>Distance</th><th>QR Score</th><th>{trendLabel}</th></tr>
     </thead>
     <tbody>
       {rows.map((m) => (
-        <tr key={m.id}>
+        <tr
+          key={m.id}
+          onClick={onRowClick ? () => onRowClick(m) : undefined}
+          style={onRowClick ? { cursor: 'pointer' } : undefined}
+        >
           <td><b>{m.name}</b></td>
           <td><PriorityBadge level={m.pri} /></td>
-          <td className="mu">{m.km} km</td>
-          <td><span className="qrbar"><i style={{ width: m.qr + '%' }} /></span> {m.qr}</td>
-          <td><Trend v={m.trend} /></td>
+          <td className="mu">{m.km == null || m.km === '—' ? '—' : `${m.km} km`}</td>
+          <td>
+            {m.qr == null ? <span className="mu">—</span> : <><span className="qrbar"><i style={{ width: m.qr + '%' }} /></span> {m.qr}</>}
+          </td>
+          <td>{typeof m.trend === 'number' ? <Trend v={m.trend} /> : <span className="mu">{m.trendText ?? '—'}</span>}</td>
         </tr>
       ))}
     </tbody>
   </table>
 )
 
+// Items: {s: 'ok' | other, title, sub, t}; an item with `onClick` is clickable (e.g. open the visit).
 export const ActivityTimeline = ({ items }) => (
   <ul className="tl">
     {items.map((a, i) => (
-      <li key={i}>
+      <li
+        key={a.key ?? i}
+        onClick={a.onClick}
+        style={a.onClick ? { cursor: 'pointer' } : undefined}
+        role={a.onClick ? 'link' : undefined}
+        tabIndex={a.onClick ? 0 : undefined}
+        onKeyDown={a.onClick ? (e) => e.key === 'Enter' && a.onClick() : undefined}
+      >
         <VisitStatus s={a.s} />
         <div><b>{a.title}</b><div className="mu sm">{a.sub}</div></div>
         <span className="mu sm">{a.t}</span>
@@ -149,7 +169,14 @@ export const ActivityTimeline = ({ items }) => (
 )
 
 export const AlertCard = ({ a }) => (
-  <div className="alert">
+  <div
+    className="alert"
+    onClick={a.onClick}
+    style={a.onClick ? { cursor: 'pointer' } : undefined}
+    role={a.onClick ? 'link' : undefined}
+    tabIndex={a.onClick ? 0 : undefined}
+    onKeyDown={a.onClick ? (e) => e.key === 'Enter' && a.onClick() : undefined}
+  >
     <PriorityBadge level={a.sev} />
     <div className="grow"><b>{a.title}</b><div className="mu sm">{a.m}</div></div>
     <span className="mu sm">{a.at}</span>

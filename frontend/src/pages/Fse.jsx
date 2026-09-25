@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Navigation,
@@ -22,10 +22,32 @@ import {
   PriorityBadge,
   EvidenceIndicator,
 } from '../components/ui'
-import { getMerchants, getProfile } from '../services/merchants'
-import { getKpis, getActivity, getMapPoints } from '../services/visits'
-import { getAlerts } from '../services/audits'
-import { getHealth, getMini } from '../services/analytics'
+import { getFseQueue, getFseSummary, getFseVisits, listFse } from '../services/fse'
+import { listMerchants } from '../services/merchants'
+import { listVisits } from '../services/visits'
+import { getVisitAudit } from '../services/audits'
+import { listEscalations } from '../services/escalations'
+import { listIncentives } from '../services/incentives'
+import { getCurrentFse, getCurrentFseId } from '../services/session'
+import {
+  ACTION_LABEL,
+  DECISION_LABEL,
+  STATUS_LABEL as VISIT_STATUS_LABEL,
+  fmtDate,
+  fmtInr,
+  fmtTime,
+  parseUtc,
+} from '../services/format'
+import {
+  byNewest,
+  daysText,
+  decisionText,
+  errText,
+  haversine,
+  level,
+  recommendedAction,
+  usePosition,
+} from '../components/rep/repData'
 
 import 'leaflet/dist/leaflet.css'
 
@@ -160,20 +182,25 @@ function createMarkerIcon(point) {
    OPENSTREETMAP VIEW
    ============================================================ */
 
-const DEFAULT_CENTER = [12.9716, 77.5946]
+const DEFAULT_CENTER = [18.5204, 73.8567] // Pune (seed territory); the rep's home is passed in when known
 
-function OpenStreetMapView({ points, onSelect, selectedPoint }) {
+function OpenStreetMapView({ points, onSelect, selectedPoint, center = DEFAULT_CENTER, onNavigate }) {
   const mapElementRef = useRef(null)
   const mapRef = useRef(null)
   const markersRef = useRef([])
   const [mapReady, setMapReady] = useState(false)
+  const navRef = useRef(onNavigate)
+  const initialCenter = useRef(center)
+  useEffect(() => {
+    navRef.current = onNavigate
+  }, [onNavigate])
 
   /* Create the Leaflet map once */
   useEffect(() => {
     if (!mapElementRef.current || mapRef.current) return
 
     const map = L.map(mapElementRef.current, {
-      center: DEFAULT_CENTER,
+      center: initialCenter.current,
       zoom: 12,
       zoomControl: false,
       preferCanvas: true,
@@ -187,6 +214,16 @@ function OpenStreetMapView({ points, onSelect, selectedPoint }) {
 
     L.control.zoom({ position: 'bottomright' }).addTo(map)
 
+    // Popup links (merchant / visit pages) navigate inside the SPA instead of reloading the page.
+    const onClick = (e) => {
+      const a = e.target.closest?.('a[data-nav]')
+      if (!a) return
+      e.preventDefault()
+      navRef.current?.(a.getAttribute('data-nav'))
+    }
+    mapElementRef.current.addEventListener('click', onClick)
+    const el = mapElementRef.current
+
     mapRef.current = map
     setMapReady(true)
 
@@ -194,6 +231,7 @@ function OpenStreetMapView({ points, onSelect, selectedPoint }) {
 
     return () => {
       clearTimeout(t)
+      el.removeEventListener('click', onClick)
       markersRef.current.forEach((m) => m.remove())
       markersRef.current = []
       map.remove()
@@ -221,9 +259,15 @@ function OpenStreetMapView({ points, onSelect, selectedPoint }) {
           <div class="sp-pu-title">${escapeHtml(point.name)}</div>
           ${point.address ? `<div class="sp-pu-addr">${escapeHtml(point.address)}</div>` : ''}
           <div class="sp-pu-row">
-            <span class="sp-pu-tag sp-pu-${point.tier}">${escapeHtml(STATUS_LABEL[point.tier])}</span>
+            <span class="sp-pu-tag sp-pu-${point.tier}">${escapeHtml(point.tierLabel || STATUS_LABEL[point.tier])}</span>
             <span class="sp-pu-coord">${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}</span>
           </div>
+          ${(point.details || []).map((t) => `<div class="sp-pu-addr">${escapeHtml(t)}</div>`).join('')}
+          ${(point.links || []).length
+            ? `<div class="sp-pu-addr">${point.links
+                .map((l) => `<a href="${escapeHtml(l.href)}" data-nav="${escapeHtml(l.href)}">${escapeHtml(l.label)}</a>`)
+                .join(' · ')}</div>`
+            : ''}
         </div>`,
         { maxWidth: 300 }
       )
@@ -237,12 +281,12 @@ function OpenStreetMapView({ points, onSelect, selectedPoint }) {
       const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng]))
       if (bounds.isValid()) map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15, animate: false })
     } else {
-      map.setView(DEFAULT_CENTER, 12)
+      map.setView(center, 12)
     }
 
     const t = setTimeout(() => map.invalidateSize(), 200)
     return () => clearTimeout(t)
-  }, [points, mapReady, onSelect])
+  }, [points, mapReady, onSelect, center])
 
   /* Fly to the selected merchant (also when returning from the network view) */
   useEffect(() => {
@@ -272,7 +316,7 @@ function OpenStreetMapView({ points, onSelect, selectedPoint }) {
         return
       }
     }
-    map.setView(DEFAULT_CENTER, 12)
+    map.setView(center, 12)
   }
 
   return (
@@ -562,7 +606,7 @@ function SpiderNetworkView({ points, onSelect, selectedPoint, onOpenMap }) {
             className={`sp-node ${n.tier} ${n.id === focusId ? 'on' : ''}`}
             tabIndex={0}
             role="button"
-            aria-label={`${n.name}, ${STATUS_LABEL[n.tier]}`}
+            aria-label={`${n.name}, ${n.tierLabel || STATUS_LABEL[n.tier]}`}
             onMouseEnter={() => setHoverId(n.id)}
             onMouseLeave={() => setHoverId(null)}
             onFocus={() => setHoverId(n.id)}
@@ -633,7 +677,7 @@ function SpiderNetworkView({ points, onSelect, selectedPoint, onOpenMap }) {
         <aside className={`sp-info ${focus ? 'has' : ''}`} aria-live="polite">
           {focus ? (
             <>
-              <span className={`sp-tag ${focus.tier}`}>{STATUS_LABEL[focus.tier]}</span>
+              <span className={`sp-tag ${focus.tier}`}>{focus.tierLabel || STATUS_LABEL[focus.tier]}</span>
               <h3>{focus.name}</h3>
               {focus.address && <p>{focus.address}</p>}
               <dl>
@@ -669,17 +713,18 @@ function SpiderNetworkView({ points, onSelect, selectedPoint, onOpenMap }) {
    FIELD COVERAGE
    ============================================================ */
 
-function FieldCoverage({ points, done, total, priority }) {
+function FieldCoverage({ points, visited, assigned, coveragePct, priority, visitCount, center, onNavigate }) {
   const [view, setView] = useState('network')
   const [selectedPoint, setSelectedPoint] = useState(null)
 
   const normalized = useMemo(() => normalizeMapPoints(points), [points])
 
-  const safeTotal = Number(total) || 0
-  const safeDone = Number(done) || 0
+  const safeTotal = Number(assigned) || 0
+  const safeDone = Number(visited) || 0
   const safePriority = Number(priority) || 0
-  const missing = Math.max(safeTotal - normalized.length, 0)
-  const completion = safeTotal > 0 ? Math.min(Math.round((safeDone / safeTotal) * 100), 100) : 0
+  const merchantPins = normalized.filter((p) => !p.isVisit).length
+  const missing = Math.max(safeTotal - merchantPins, 0)
+  const completion = Math.min(Math.round(Number(coveragePct) || 0), 100)
 
   return (
     <section className="card sp-field">
@@ -690,11 +735,12 @@ function FieldCoverage({ points, done, total, priority }) {
 
         <div>
           <h2>
-            Today's field coverage
+            Field coverage · 30 days
             <span className="sp-live"><i />Live</span>
           </h2>
           <div className="sp-sub">
-            {safeDone} of {safeTotal} visits completed, {normalized.length} locations mapped
+            {safeDone} of {safeTotal} assigned merchants visited, {merchantPins} shops mapped, {visitCount} visits in
+            the last 30 days
           </div>
         </div>
 
@@ -710,13 +756,13 @@ function FieldCoverage({ points, done, total, priority }) {
 
       <div className="sp-strip">
         <div className="sp-stat">
-          <span>Completion</span>
+          <span>Coverage</span>
           <strong className="blue">{completion}%</strong>
           <div className="sp-bar"><i style={{ width: `${completion}%` }} /></div>
         </div>
         <div className="sp-stat">
           <span>Mapped</span>
-          <strong>{normalized.length}</strong>
+          <strong>{merchantPins}</strong>
         </div>
         <div className="sp-stat">
           <span>High priority</span>
@@ -729,10 +775,16 @@ function FieldCoverage({ points, done, total, priority }) {
       </div>
 
       {view === 'map' ? (
-        <OpenStreetMapView points={normalized} selectedPoint={selectedPoint} onSelect={setSelectedPoint} />
+        <OpenStreetMapView
+          points={normalized}
+          selectedPoint={selectedPoint}
+          onSelect={setSelectedPoint}
+          center={center}
+          onNavigate={onNavigate}
+        />
       ) : (
         <SpiderNetworkView
-          points={normalized}
+          points={normalized.filter((p) => !p.isVisit)}
           selectedPoint={selectedPoint}
           onSelect={setSelectedPoint}
           onOpenMap={() => setView('map')}
@@ -743,41 +795,152 @@ function FieldCoverage({ points, done, total, priority }) {
 }
 
 /* ============================================================
+   DATA → WIDGETS
+   ============================================================ */
+
+const shortDate = (s) => parseUtc(s)?.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) ?? '—'
+
+function greeting() {
+  const h = new Date().getHours()
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
+}
+
+// Assigned merchants (tier from today's queue) + visits taken away from their shop, with popups linking to the pages.
+function buildMapPoints({ merchants, queue, visits }) {
+  const q = new Map(queue.map((r) => [r.merchant_id, r]))
+  const byMerchant = new Map()
+  for (const v of visits) {
+    if (!byMerchant.has(v.merchant_id)) byMerchant.set(v.merchant_id, [])
+    byMerchant.get(v.merchant_id).push(v)
+  }
+  const mById = new Map(merchants.map((m) => [m.id, m]))
+
+  const shopPoints = merchants.map((m) => {
+    const row = q.get(m.id)
+    const mv = (byMerchant.get(m.id) || []).slice().sort(byNewest)
+    return {
+      id: `m-${m.id}`,
+      merchantId: m.id,
+      name: m.name,
+      address: m.address,
+      lat: m.lat,
+      lng: m.lng,
+      priority: row ? level(row).toLowerCase() : '',
+      completed: !row,
+      tierLabel: row ? `${level(row)} priority · ${row.priority}` : 'Visited today',
+      details: [
+        ...(row?.reasons || []),
+        `Last visit ${m.last_visit_at ? fmtDate(m.last_visit_at) : 'never'}`,
+        mv.length ? `${mv.length} of your visits in the last 30 days` : 'No visit by you in the last 30 days',
+      ],
+      links: [
+        { href: `/merchants/${m.id}`, label: 'Merchant 360' },
+        ...mv.slice(0, 3).map((v) => ({ href: `/visits/${v.id}`, label: `Visit #${v.id}` })),
+        { href: `/fse/mobile?merchant=${m.id}`, label: 'Start visit' },
+      ],
+    }
+  })
+
+  // A visit is pinned on its own when its GPS is away from the shop (or the shop is not assigned to this rep).
+  const visitPoints = visits
+    .filter((v) => v.lat != null && v.lng != null)
+    .filter((v) => {
+      const m = mById.get(v.merchant_id)
+      return !m || (haversine(v, m) ?? 0) > 75
+    })
+    .map((v) => ({
+      id: `v-${v.id}`,
+      isVisit: true,
+      name: `Visit #${v.id} · ${v.merchant_name}`,
+      address: `${fmtDate(v.received_at)} ${fmtTime(v.received_at)}`,
+      lat: v.lat,
+      lng: v.lng,
+      completed: true,
+      tierLabel: VISIT_STATUS_LABEL[v.status] || v.status,
+      details: [`${v.decision ? DECISION_LABEL[v.decision] : 'No decision'} · QR ${v.qr_visibility_score ?? '—'}`],
+      links: [{ href: `/visits/${v.id}`, label: 'Open visit' }],
+    }))
+
+  return [...shopPoints, ...visitPoints]
+}
+
+/* ============================================================
    MAIN FSE PAGE
    ============================================================ */
 
 export default function Fse() {
   const nav = useNavigate()
+  const pos = usePosition()
+  const fseId = getCurrentFseId()
 
   const [d, setD] = useState(null)
   const [error, setError] = useState(null)
+  const [nbAudit, setNbAudit] = useState(null) // latest audit + visit of the next best merchant
+  const seq = useRef(0)
+
+  const load = useCallback(
+    (p) => {
+      const n = ++seq.current
+      Promise.all([
+        listFse(),
+        getFseSummary(fseId, p || {}),
+        getFseQueue(fseId, p || {}),
+        listMerchants(),
+        getFseVisits(fseId, 30),
+        listVisits({ fseId, limit: 6 }),
+        listEscalations('open'),
+        listIncentives(fseId),
+      ])
+        .then(([reps, summary, queue, merchants, visits30, recent, escalations, incentives]) => {
+          if (n !== seq.current) return
+          setError(null)
+          const fse = reps.find((f) => f.id === fseId) || { ...getCurrentFse(), ...summary.fse }
+          setD({ fse, summary, queue, merchants, visits30, recent, escalations, incentives })
+        })
+        .catch((err) => n === seq.current && setError(err))
+    },
+    [fseId],
+  )
 
   useEffect(() => {
-    let mounted = true
+    load(null)
+  }, [load])
+  useEffect(() => {
+    if (pos) load(pos) // adds distance to the queue order and the next best visit
+  }, [pos, load])
 
-    Promise.all([
-      getProfile(),
-      getKpis(),
-      getMerchants(),
-      getMapPoints(),
-      getActivity(),
-      getAlerts(),
-      getHealth(),
-      getMini(),
-    ])
-      .then(([profile, kpis, merchants, points, activity, alerts, health, mini]) => {
-        if (!mounted) return
-        setD({ profile, kpis, merchants, points, activity, alerts, health, mini })
+  // Competitor / recommended action / authenticity for the next best merchant come from its latest visit's audit.
+  const nbId = d?.summary?.next_best?.merchant_id
+  useEffect(() => {
+    if (!nbId) return
+    let alive = true
+    listVisits({ merchantId: nbId, limit: 1 })
+      .then(async ([v]) => {
+        if (!v) return { visit: null, audit: null }
+        const audit = await getVisitAudit(v.id).catch((e) => {
+          if (e?.status === 404) return null
+          throw e
+        })
+        return { visit: v, audit }
       })
-      .catch((err) => {
-        console.error('FSE dashboard failed:', err)
-        if (mounted) setError(err)
-      })
-
+      .then((r) => alive && setNbAudit({ id: nbId, ...r }))
+      .catch((e) => alive && setNbAudit({ id: nbId, error: e }))
     return () => {
-      mounted = false
+      alive = false
     }
-  }, [])
+  }, [nbId])
+
+  const points = useMemo(
+    () =>
+      d
+        ? buildMapPoints({
+            merchants: d.merchants.filter((m) => m.assigned_fse_id === fseId),
+            queue: d.queue,
+            visits: d.visits30,
+          })
+        : [],
+    [d, fseId],
+  )
 
   if (error) {
     return (
@@ -786,7 +949,8 @@ export default function Fse() {
         <div className="pad sp-blue">
           <div className="card" style={{ padding: 24 }}>
             <h2>Unable to load operations</h2>
-            <p className="mu">{error?.message || 'Something went wrong while loading field data.'}</p>
+            <p className="mu">{errText(error)}</p>
+            <button className="btn" style={{ marginTop: 12 }} onClick={() => load(pos)}>Retry</button>
           </div>
         </div>
       </Layout>
@@ -802,31 +966,105 @@ export default function Fse() {
     )
   }
 
-  const m = d.merchants?.[0] || {
-    name: 'No merchant selected',
-    km: '—',
-    last: '—',
-    qr: 0,
-    reasons: [],
-    competitor: '—',
-    comp: '—',
-    action: 'Awaiting field intelligence',
-    pri: 'normal',
-  }
+  const { fse, summary, queue } = d
+  const cov = summary.coverage
+  const perf = summary.performance
+  const nb = summary.next_best
+  const audit = nbAudit?.id === nb?.merchant_id ? nbAudit : null
+  const high = queue.filter((q) => level(q) === 'HIGH').length
+  const first = (fse?.name || 'there').split(' ')[0]
+  const center = fse?.home_lat != null ? [fse.home_lat, fse.home_lng] : DEFAULT_CENTER
+  const merchantName = new Map(d.merchants.map((m) => [m.id, m.name]))
+  const pct = (x) => (x == null ? '—' : `${Math.round(x)}%`)
 
-  const done = Number(d.kpis?.[1]?.v) || 0
-  const total = Number(d.kpis?.[0]?.v) || 0
-  const priority = Number(d.kpis?.[2]?.v) || 0
+  const kpis = [
+    { k: 'Assigned merchants', v: cov.assigned, d: fse?.territory || 'Territory', up: true },
+    { k: 'Visited · 30 days', v: cov.visited, d: `${pct(cov.coverage_pct)} coverage`, up: cov.coverage_pct >= 80 },
+    { k: 'Still to visit today', v: queue.length, d: `${high} high priority`, up: high === 0 },
+    {
+      k: 'Verified visits',
+      v: pct(perf.verified_pct),
+      d: `of ${perf.visits} visit${perf.visits === 1 ? '' : 's'} (30 days)`,
+      up: perf.verified_pct != null && perf.verified_pct >= 90,
+    },
+  ]
+
+  const tableRows = queue.slice(0, 5).map((q) => ({
+    id: q.merchant_id,
+    name: q.name,
+    pri: level(q),
+    km: q.distance_m == null ? null : (q.distance_m / 1000).toFixed(1),
+    qr: q.latest_score,
+    trend: null,
+    trendText: daysText(q.days_since_visit),
+  }))
+
+  const activity = d.recent.map((v) => ({
+    key: v.id,
+    s: v.status === 'completed' && v.decision === 'compliant' ? 'ok' : 'wait',
+    title: v.merchant_name,
+    sub: `Visit #${v.id} · ${VISIT_STATUS_LABEL[v.status] || v.status}${v.decision ? ` · ${DECISION_LABEL[v.decision]}` : ''}${
+      v.qr_visibility_score != null ? ` · QR ${v.qr_visibility_score}` : ''
+    }`,
+    t: `${shortDate(v.received_at)} ${fmtTime(v.received_at)}`,
+    onClick: () => nav(`/visits/${v.id}`),
+  }))
+
+  const alerts = [
+    ...d.escalations
+      .filter((e) => e.fse_name === fse?.name)
+      .map((e) => ({
+        key: `e${e.id}`,
+        sev: e.authenticity_score != null && e.authenticity_score < 70 ? 'HIGH' : 'MEDIUM',
+        title: `Escalated: ${e.reason}`,
+        m: `${e.merchant_name} · visit #${e.visit_id}`,
+        at: shortDate(e.created_at),
+        onClick: () => nav(`/visits/${e.visit_id}`),
+      })),
+    ...queue
+      .filter((q) => (q.reasons || []).some((r) => r.startsWith('Open issue') || r.startsWith('Transactions')))
+      .map((q) => ({
+        key: `q${q.merchant_id}`,
+        sev: level(q),
+        title: (q.reasons || []).filter((r) => r.startsWith('Open issue') || r.startsWith('Transactions')).join(' · '),
+        m: q.name,
+        at: daysText(q.days_since_visit),
+        onClick: () => nav(`/merchants/${q.merchant_id}`),
+      })),
+  ].slice(0, 5)
+
+  const health = d.visits30
+    .filter((v) => v.qr_visibility_score != null)
+    .map((v) => ({ label: shortDate(v.received_at), value: v.qr_visibility_score }))
+
+  const incentiveItems = (d.incentives.items || []).slice(0, 5).map((i) => ({
+    key: i.id,
+    s: i.status === 'paid' ? 'ok' : 'wait',
+    title: `${fmtInr(i.amount_inr)} · ${merchantName.get(i.merchant_id) || `Merchant #${i.merchant_id}`}`,
+    sub: `${i.reason} · visit #${i.visit_id} · ${i.status}`,
+    t: shortDate(i.created_at),
+    onClick: () => nav(`/visits/${i.visit_id}`),
+  }))
+
+  const mini = [
+    { k: 'Avg authenticity (30 d)', v: perf.avg_authenticity == null ? '—' : `${Math.round(perf.avg_authenticity)} / 100`, warn: perf.avg_authenticity != null && perf.avg_authenticity < 70 },
+    { k: 'Compliant visits (30 d)', v: pct(perf.compliant_pct), warn: perf.compliant_pct != null && perf.compliant_pct < 50 },
+    { k: 'Conversions (non-compliant → compliant)', v: perf.conversions, warn: false },
+    { k: 'Incentives earned (30 d)', v: fmtInr(perf.incentives_inr), warn: false },
+  ]
 
   return (
-    <Layout crumb="Operations" profile={d.profile}>
+    <Layout crumb="Operations" profile={{ name: fse?.name, role: `FSE · ${fse?.territory || ''}`, first }}>
       <style>{CSS}</style>
 
       <div className="pad sp-blue">
         <div className="head">
           <div>
-            <h1>Good morning, {d.profile.first}</h1>
-            <p className="mu">Here’s what needs your attention today.</p>
+            <h1>{greeting()}, {first}</h1>
+            <p className="mu">
+              Here’s what needs your attention today{fse?.territory ? ` in ${fse.territory}` : ''}.
+              {pos === null ? ' Location unavailable: distances are not shown.' : ''}
+            </p>
           </div>
 
           <div className="grow" />
@@ -836,74 +1074,111 @@ export default function Fse() {
             Field mode active
           </span>
 
-          <button className="btn sel">
-            Today
+          <button className="btn sel" title="Coverage and performance cover the last 30 days; the queue is today's">
+            Last 30 days
             <ChevronDown size={15} />
           </button>
         </div>
 
         <div className="g4">
-          {d.kpis.map((k, i) => (
+          {kpis.map((k, i) => (
             <StatCard key={k.k} label={k.k} value={k.v} note={k.d} up={k.up} i={i} />
           ))}
         </div>
 
         <div className="g2">
-          <FieldCoverage points={d.points} done={done} total={total} priority={priority} />
+          <FieldCoverage
+            points={points}
+            visited={cov.visited}
+            assigned={cov.assigned}
+            coveragePct={cov.coverage_pct}
+            priority={high}
+            visitCount={d.visits30.length}
+            center={center}
+            onNavigate={nav}
+          />
 
           <section className="card next" style={{ '--i': 5 }}>
             <div className="row">
               <h2>Next Best Visit</h2>
               <span className="grow" />
-              <PriorityBadge level={m.pri} />
+              {nb && <PriorityBadge level={level(nb)} />}
             </div>
 
-            <div className="row top16">
-              <div>
-                <h3>{m.name}</h3>
-                <div className="mu sm">
-                  <Navigation size={12} />
-                  {m.km} km away · last visit {m.last}
+            {!nb ? (
+              <p className="mu top16">Queue is clear: every assigned merchant has a usable visit today.</p>
+            ) : (
+              <>
+                <div className="row top16">
+                  <div>
+                    <h3>{nb.name}</h3>
+                    <div className="mu sm">
+                      <Navigation size={12} />
+                      {nb.distance_m == null ? 'distance needs your location' : `${(nb.distance_m / 1000).toFixed(1)} km away`} · last
+                      visit {daysText(nb.days_since_visit)} · priority {nb.priority}
+                    </div>
+                  </div>
+                  <span className="grow" />
+                  <ScoreRing value={nb.latest_score} />
                 </div>
-              </div>
-              <span className="grow" />
-              <ScoreRing value={m.qr} />
-            </div>
 
-            <div className="why">
-              {(m.reasons || []).map((r) => (
-                <div key={r}>
-                  <i />
-                  {r}
+                <div className="why">
+                  {(nb.reasons || []).map((r) => (
+                    <div key={r}>
+                      <i />
+                      {r}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
 
-            <div className="two">
-              <div>
-                <span className="mu sm">Competitor presence</span>
-                <b>{m.competitor} · {m.comp}</b>
-              </div>
-              <div>
-                <span className="mu sm">Evidence</span>
-                <EvidenceIndicator />
-              </div>
-            </div>
+                <div className="two">
+                  <div>
+                    <span className="mu sm">Competitor presence</span>
+                    <b>
+                      {!audit
+                        ? '…'
+                        : audit.error
+                          ? '—'
+                          : audit.audit
+                            ? `${audit.audit.competitor || 'None seen'} · ${(audit.audit.competitor_dominance || '—').toUpperCase()}`
+                            : 'No audit yet'}
+                    </b>
+                  </div>
+                  <div>
+                    <span className="mu sm">Evidence</span>
+                    <EvidenceIndicator
+                      label={
+                        audit?.visit?.authenticity_score != null
+                          ? `Authenticity ${audit.visit.authenticity_score}/100`
+                          : audit?.visit
+                            ? decisionText(audit.visit.decision)
+                            : 'No visit yet'
+                      }
+                    />
+                  </div>
+                </div>
 
-            <div className="rec">
-              <span className="mu sm">Recommended action</span>
-              <b>{m.action}</b>
-            </div>
+                <div className="rec">
+                  <span className="mu sm">Recommended action</span>
+                  <b>
+                    {audit?.audit?.recommended_action && audit.audit.recommended_action !== 'none'
+                      ? ACTION_LABEL[audit.audit.recommended_action]
+                      : recommendedAction(nb)}
+                  </b>
+                  {audit?.error && <div className="mu sm">Latest audit unavailable: {errText(audit.error)}</div>}
+                </div>
 
-            <div className="row gap">
-              <button className="btn p grow" onClick={() => nav('/visits/SP-10482')}>
-                <Camera size={16} />
-                START VISIT
-              </button>
-              <button className="btn" onClick={() => nav('/merchants/m1')}>
-                VIEW MERCHANT
-              </button>
-            </div>
+                <div className="row gap">
+                  <button className="btn p grow" onClick={() => nav(`/fse/mobile?merchant=${nb.merchant_id}`)}>
+                    <Camera size={16} />
+                    START VISIT
+                  </button>
+                  <button className="btn" onClick={() => nav(`/merchants/${nb.merchant_id}`)}>
+                    VIEW MERCHANT
+                  </button>
+                </div>
+              </>
+            )}
           </section>
         </div>
 
@@ -916,37 +1191,48 @@ export default function Fse() {
                 View all
               </button>
             </div>
-            <PriorityTable rows={d.merchants} />
+            {tableRows.length ? (
+              <PriorityTable rows={tableRows} trendLabel="Last visit" onRowClick={(m) => nav(`/merchants/${m.id}`)} />
+            ) : (
+              <p className="mu">Nothing left in today's queue.</p>
+            )}
           </section>
 
           <section className="card" style={{ '--i': 7 }}>
             <h2>Visit Activity</h2>
-            <ActivityTimeline items={d.activity} />
+            {activity.length ? <ActivityTimeline items={activity} /> : <p className="mu">No visits recorded yet.</p>}
           </section>
         </div>
 
         <div className="g2">
           <section className="card" style={{ '--i': 8 }}>
             <h2>Merchant Health</h2>
-            <HealthGraph data={d.health} />
+            <HealthGraph data={health} />
           </section>
 
           <section className="card" style={{ '--i': 9 }}>
             <h2>AI Alerts</h2>
-            {d.alerts.map((a) => (
-              <AlertCard key={a.title} a={a} />
-            ))}
+            {alerts.length ? alerts.map((a) => <AlertCard key={a.key} a={a} />) : <p className="mu">No open alerts.</p>}
           </section>
         </div>
 
         <div className="g4">
-          {d.mini.map((k, i) => (
+          {mini.map((k, i) => (
             <div key={k.k} className="card mini" style={{ '--i': 10 + i }}>
               <span className="mu sm">{k.k}</span>
               <b className={k.warn ? 'red' : ''}>{k.v}</b>
             </div>
           ))}
         </div>
+
+        <section className="card" style={{ '--i': 14 }}>
+          <div className="row">
+            <h2>Recent Incentives</h2>
+            <span className="grow" />
+            <span className="mu sm">Total earned {fmtInr(d.incentives.total_inr)}</span>
+          </div>
+          {incentiveItems.length ? <ActivityTimeline items={incentiveItems} /> : <p className="mu">No incentives yet.</p>}
+        </section>
       </div>
     </Layout>
   )
@@ -975,7 +1261,7 @@ function HealthGraph({ data }) {
   }, [data])
 
   if (!values.length) {
-    return <div className="sp-health-empty">Waiting for merchant health data…</div>
+    return <div className="sp-health-empty">No scored visits in the last 30 days.</div>
   }
 
   const width = 760
@@ -1019,7 +1305,7 @@ function HealthGraph({ data }) {
       </div>
 
       <div className="sp-health-plot">
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Merchant health over time">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="QR visibility score of recent visits">
           <defs>
             <linearGradient id="spHealthFill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#1F5BFF" stopOpacity="0.22" />
@@ -1054,7 +1340,7 @@ function HealthGraph({ data }) {
 
       <div className="sp-health-foot">
         <Activity size={12} />
-        Merchant health signal over available field data
+        QR visibility score of your visits over the last 30 days
       </div>
     </div>
   )
