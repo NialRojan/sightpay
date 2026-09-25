@@ -25,6 +25,8 @@ def create_app() -> FastAPI:
             "n8n": bool(settings.n8n_webhook_url),
             "memory": settings.memory_backend,
             "whatsapp": settings.whatsapp_mode,
+            "sarvam": bool(settings.sarvam_api_key),
+            "twilio": bool(settings.twilio_account_sid and settings.twilio_auth_token),
         }
 
     os.makedirs(settings.upload_dir, exist_ok=True)
