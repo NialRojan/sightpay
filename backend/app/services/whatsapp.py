@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 import ipaddress
 import logging
 from dataclasses import dataclass
@@ -12,7 +15,7 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class SendResult:
-    status: str  # dry_run | sent | failed
+    status: str  # dry_run | sent | failed (later delivered | read | undelivered via status callback)
     provider_ref: str | None = None
     error: str | None = None
 
@@ -32,11 +35,22 @@ def _is_public(url: str) -> bool:
         return True  # a DNS name
 
 
+STATUS_CALLBACK_PATH = "/api/webhooks/twilio/status"
+
+
+def twilio_signature(auth_token: str, url: str, params: dict[str, str]) -> str:
+    """X-Twilio-Signature: base64(HMAC-SHA1(auth_token, url + key1 + value1 + key2 + value2 ...)), keys sorted."""
+    payload = url + "".join(k + params[k] for k in sorted(params))
+    return base64.b64encode(hmac.new(auth_token.encode(), payload.encode(), hashlib.sha1).digest()).decode()
+
+
 def _send_twilio(to_phone: str, body: str, media_url: str | None) -> SendResult:
     sid = settings.twilio_account_sid
     data = {"From": f"whatsapp:{settings.twilio_whatsapp_from}", "To": f"whatsapp:{to_phone}", "Body": body}
     if media_url and _is_public(media_url):
         data["MediaUrl"] = media_url
+    if _is_public(settings.public_base_url):  # Twilio cannot call back to localhost/LAN
+        data["StatusCallback"] = f"{settings.public_base_url.rstrip('/')}{STATUS_CALLBACK_PATH}"
     try:
         res = httpx.post(
             f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",

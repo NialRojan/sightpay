@@ -77,7 +77,11 @@ Guidance, WhatsApp and memory details:
 - **`guidance` step summary** is `"{engine}: {issue} guidance in {language}"`, followed by `" with voice note"` when
   `audio_url` is set. `engine` is `sarvam` (translated + voiced), `sarvam_tts` (template text, voiced) or `template`
   (no Sarvam). `data.text` is the text that was sent.
-- **`actions.notifications[].status`** is `dry_run` | `sent` | `failed`. Twilio is used only when `WHATSAPP_MODE=twilio`
+- **`actions.notifications[].status`** is `dry_run` | `sent` | `delivered` | `read` | `failed` | `undelivered`. `sent`
+  only means Twilio accepted the message; `delivered`, `read` and `undelivered` (and a later `failed`) arrive afterwards
+  from Twilio's status callback (see [Webhooks](#webhooks-twilio-facing)), which also sets `error` to
+  `"Twilio <ErrorCode>: <ErrorMessage>"` and adds a `whatsapp_status` step (e.g. `"WhatsApp undelivered (Twilio 63015)"`).
+  Without a public `PUBLIC_BASE_URL` no callback is requested and a Twilio message stays `sent`. Twilio is used only when `WHATSAPP_MODE=twilio`
   **and** both `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are set; otherwise the message is logged as `dry_run`. A
   Twilio error is recorded as `failed` with `error` set (the visit still completes); `provider_ref` is the Twilio message
   SID when `sent`. `to_phone` is the number actually messaged: `WHATSAPP_DEMO_TO` when that is set, otherwise the
@@ -498,3 +502,16 @@ All `/fse/{id}/...` endpoints return **404 for an unknown FSE**. "Visited" below
 - `POST /audit/analyze-image` (multipart photo) → `{quality, audit, provider}` (stateless try-it; same 413/415/422 rules as `POST /visits`)
 - `GET /incentives?fse_id=` → `{total_inr, items[]}` · `GET /transactions?merchant_id=&days=30`
 - `GET /health` → which providers are live (`vision_provider`, `anthropic_key` (a key is configured), `n8n`, `memory`, `whatsapp`)
+
+## Webhooks (Twilio-facing)
+
+**Called by Twilio, not the frontend.**
+
+- `POST /webhooks/twilio/status` (form-encoded Twilio status callback: `MessageSid`, `MessageStatus`, optional
+  `ErrorCode`, `ErrorMessage`) → `204`, empty body. The backend asks Twilio for this callback (`StatusCallback`) only
+  when `PUBLIC_BASE_URL` is publicly reachable (e.g. an ngrok `https://….ngrok.app` URL), because Twilio cannot reach
+  `localhost` or LAN addresses. Requests must carry a valid `X-Twilio-Signature` computed with `TWILIO_AUTH_TOKEN` over
+  `PUBLIC_BASE_URL` + the request path; a missing or wrong signature, or no Twilio auth token configured, → `403`.
+  The notification whose `provider_ref` equals `MessageSid` moves to `delivered`, `read`, `failed` or `undelivered`;
+  `queued`/`sending`/`sent` are ignored and a status never moves backwards (a late `delivered` after `read` keeps
+  `read`). An unknown `MessageSid` is a no-op `204` (Twilio retries on non-2xx).

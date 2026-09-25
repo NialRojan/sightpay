@@ -30,7 +30,8 @@ memory.
 - `WHATSAPP_MODE=twilio` + `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` (+ `TWILIO_WHATSAPP_FROM`, default the Twilio
   sandbox number) sends real WhatsApp messages. Twilio is used only when the mode is `twilio` and both credentials are
   set; otherwise messages stay `dry_run`. Voice notes are attached only when `PUBLIC_BASE_URL` is publicly reachable
-  (Twilio cannot fetch `localhost` or LAN addresses).
+  (Twilio cannot fetch `localhost` or LAN addresses). With a public `PUBLIC_BASE_URL` (e.g. ngrok) Twilio also posts
+  signed delivery callbacks to `/api/webhooks/twilio/status`, so notifications move on to `delivered`/`read`/`undelivered`/`failed`.
 - `WHATSAPP_DEMO_TO=+91...`: **set this for demos.** Every WhatsApp goes to this number instead of the merchant's.
 - `MEMORY_BACKEND=cognee` uses Cognee for merchant memory. Install it and load the seeded history first:
 
