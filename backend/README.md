@@ -56,7 +56,7 @@ memory.
       LLM_API_KEY=ollama
       EMBEDDING_PROVIDER=ollama
       EMBEDDING_MODEL=nomic-embed-text:latest
-      EMBEDDING_ENDPOINT=http://localhost:11434/api/embeddings
+      EMBEDDING_ENDPOINT=http://localhost:11434/api/embed
       EMBEDDING_DIMENSIONS=768
       HUGGINGFACE_TOKENIZER=nomic-ai/nomic-embed-text-v1.5
       COGNEE_TIMEOUT_S=20
