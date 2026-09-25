@@ -1,6 +1,14 @@
 import os
 
 # Must be set before app modules are imported.
+# Never read the developer's backend/.env, and drop any live credentials exported in the shell,
+# so tests stay offline and deterministic.
+os.environ["SIGHTPAY_ENV_FILE"] = ""
+for _key in (
+    "ANTHROPIC_API_KEY", "SARVAM_API_KEY", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM",
+    "WHATSAPP_DEMO_TO", "PUBLIC_BASE_URL", "GPS_RADIUS_M", "INTERNAL_TOKEN", "COGNEE_TIMEOUT_S", "UPLOAD_DIR",
+):
+    os.environ.pop(_key, None)
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["VISION_PROVIDER"] = "fixture"
 os.environ["N8N_WEBHOOK_URL"] = ""
