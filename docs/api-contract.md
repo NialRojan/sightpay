@@ -86,8 +86,11 @@ Guidance, WhatsApp and memory details:
   Twilio error is recorded as `failed` with `error` set (the visit still completes); `provider_ref` is the Twilio message
   SID when `sent`. `to_phone` is the number actually messaged: `WHATSAPP_DEMO_TO` when that is set, otherwise the
   merchant's phone. When redirected, the `whatsapp` step summary ends with `" (redirected to demo phone +91…1234)"`
-  (first three and last four characters of `WHATSAPP_DEMO_TO`). The voice note is attached to the WhatsApp message only
-  when `audio_url` is on a public host (not `localhost` or a private/LAN IP, which Twilio cannot fetch); `audio_url` is stored on the notification either way.
+  (first three and last four characters of `WHATSAPP_DEMO_TO`). The voice note goes as a second WhatsApp message right after the text
+  (WhatsApp drops the caption of a voice note), and only when `audio_url` is on a public host (not `localhost` or a
+  private/LAN IP, which Twilio cannot fetch); `audio_url` is stored on the notification either way. `provider_ref` and
+  the delivery status track the text message; a failed voice note is noted in `error` (`voice note not sent: ...`) while
+  the status stays `sent`.
 - **Merchant memory `source`** (`merchant_context` step `data.source`, and `context.source` on `GET /merchants/{id}`)
   is `sql` (`MEMORY_BACKEND=sql`), `cognee` (the summary came from Cognee) or `sql_fallback` (`MEMORY_BACKEND=cognee`
   but Cognee errored, returned nothing, or took longer than `COGNEE_TIMEOUT_S`, so the SQL summary is used).
