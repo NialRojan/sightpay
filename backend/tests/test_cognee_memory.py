@@ -1,6 +1,7 @@
 import logging
 import sys
 import time
+import types
 from datetime import date
 
 from sqlalchemy import select
@@ -100,7 +101,9 @@ def test_missing_cognee_falls_back_and_only_logs(db, monkeypatch, caplog):
         def start(self):
             self.target()
 
-    monkeypatch.setattr(cognee_memory.threading, "Thread", InlineThread)
+    # Patch only cognee_memory's reference: patching threading.Thread globally also hijacks the
+    # ThreadPoolExecutor's worker threads, which made this test fail whenever the pool spawned one.
+    monkeypatch.setattr(cognee_memory, "threading", types.SimpleNamespace(Thread=InlineThread))
     caplog.set_level(logging.WARNING, logger=cognee_memory.__name__)
 
     world = make_world(db)
@@ -111,3 +114,15 @@ def test_missing_cognee_falls_back_and_only_logs(db, monkeypatch, caplog):
     assert any("Cognee add failed" in r.getMessage() and r.exc_info and issubclass(r.exc_info[0], ImportError)
                for r in caplog.records)
     assert isinstance(CogneeMemory().adapter, CogneeAdapter)
+
+
+def test_pool_submit_failure_falls_back_to_sql(db, monkeypatch):
+    from app.services.memory import cognee_memory
+
+    class BrokenPool:
+        def submit(self, *a, **k):
+            raise RuntimeError("cannot schedule new futures after shutdown")
+
+    monkeypatch.setattr(cognee_memory, "_pool", BrokenPool())
+    m = _ramesh(db)
+    assert CogneeMemory(adapter=FakeAdapter()).get_context(db, m.id).source == "sql_fallback"

@@ -102,11 +102,13 @@ class CogneeMemory:
         ctx = self.fallback.get_context(db, merchant_id, exclude_visit_id)
         query = (f"Summarize what we know about merchant {ctx.merchant_name}: previous QR issues, competitors, "
                  f"interventions and their outcomes. Two sentences.")
-        future = _pool.submit(self.adapter.search, query, f"merchant_{merchant_id}")
-        try:
+        future = None
+        try:  # submit too: a pool failure must fall back to SQL, never fail the visit
+            future = _pool.submit(self.adapter.search, query, f"merchant_{merchant_id}")
             answer = future.result(timeout=settings.cognee_timeout_s)
         except (FutureTimeout, Exception) as exc:
-            future.cancel()  # only helps if it never started; a running search finishes in its worker
+            if future is not None:
+                future.cancel()  # only helps if it never started; a running search finishes in its worker
             log.warning("Cognee context unavailable (%r); using SQL memory", exc)
             ctx.source = "sql_fallback"
             return ctx
