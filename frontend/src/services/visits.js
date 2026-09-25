@@ -1,6 +1,5 @@
 // Visits: the core demo loop. POST /visits (multipart) -> poll GET /visits/{id} while "analyzing".
 import { get, postForm, request, mediaUrl } from './api'
-import { legacyVisitFields, legacyKpis, legacyMapPoints, legacyActivity } from './legacy'
 
 // GET /visits?fse_id=&merchant_id=&limit= -> VisitSummary[] (newest first, limit <= 200)
 export const listVisits = ({ fseId, merchantId, limit } = {}) =>
@@ -55,14 +54,3 @@ export async function pollVisit(id, { intervalMs = 1000, timeoutMs = 90000, onUp
 
 // The visit photo, rewritten so it loads on a phone too (null for seeded visits: show a placeholder).
 export const visitPhotoUrl = (visit) => mediaUrl(visit?.photo_url)
-
-/* ---- Legacy names still imported by pages. They call the real API. TODO(page): drop the legacy fields. ---- */
-
-// VisitAudit.jsx: real VisitOut plus the old demo keys (merchant, date, time, verification, evidenceChain, ...).
-export const getVisit = async (id) => legacyVisitFields(await getVisitDetail(id))
-export const analyzeVisit = async (id) => legacyVisitFields(await startVisitAnalysis(id))
-export const getVisits = (params) => listVisits(params)
-// Fse.jsx dashboard widgets, derived from the current FSE's summary/queue/visits.
-export const getKpis = legacyKpis
-export const getMapPoints = legacyMapPoints
-export const getActivity = legacyActivity

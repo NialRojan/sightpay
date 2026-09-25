@@ -1,5 +1,4 @@
 import { get, postForm } from './api'
-import { legacyAlerts } from './legacy'
 
 // GET /audit/{visit_id} -> AuditOut {paytm_qr_visible, qr_visibility_score, soundbox_visible, competitor,
 //   competitor_dominance, qr_obstructed, image_quality, blur_score, suspicious_signals[], recommended_action,
@@ -9,8 +8,4 @@ export const getVisitAudit = (visitId) => get(`/audit/${visitId}`)
 // POST /audit/analyze-image (multipart photo) -> {quality, audit, provider}. Stateless "try it"; nothing is stored.
 export const analyzeImage = (photo) => postForm('/audit/analyze-image', { photo })
 
-/* ---- Legacy names still imported by pages. ---- */
-export const getAudit = getVisitAudit
 export { approveEscalation, rejectEscalation } from './escalations'
-// Fse.jsx "AI Alerts": open escalations as [{sev, title, m, at}] (+ the real row). TODO(page)
-export const getAlerts = legacyAlerts
