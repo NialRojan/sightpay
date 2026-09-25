@@ -1887,7 +1887,6 @@ function AnalyticsStyles() {
   return (
     <style>{`
       .analytics-page {
-        min-height: 100%;
         padding: 30px 34px 70px;
         color: #0A1B3D;
         background:
@@ -1923,7 +1922,7 @@ function AnalyticsStyles() {
         line-height: 1;
         letter-spacing: -.045em;
         font-weight: 700;
-        color: #F5F7F4;
+        color: #0A1B3D;
       }
 
       .analytics-header p {

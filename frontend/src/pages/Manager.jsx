@@ -615,7 +615,7 @@ const CSS = `
 .mg-table-wrap{overflow-x:auto}
 .mg-table{min-width:640px}
 .mg-tr{display:grid;grid-template-columns:1.6fr repeat(5,1fr);gap:12px;align-items:center;padding:12px 10px;border-bottom:1px solid var(--line);font-size:13px}
-.mg-tr.head{font-size:11px;font-weight:700;color:var(--ink2)}
+.mg-tr.head{display:grid;margin-bottom:0;font-size:11px;font-weight:700;color:var(--ink2)} /* .sp .head (flex) would override the grid */
 .mg-tr .name{font-weight:600}
 .mg-tr u{display:block;height:4px;margin-top:4px;border-radius:99px;background:#EEF3FF;overflow:hidden;text-decoration:none}
 .mg-tr u i{display:block;height:100%;border-radius:99px;background:var(--lime)}

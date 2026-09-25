@@ -102,7 +102,7 @@ export default function VisitAudit() {
         .va-vchip{display:inline-flex;align-items:center;gap:6px;background:#111515;border:1px solid rgba(245,247,244,0.08);border-radius:999px;padding:7px 12px 7px 8px;font-size:12px}
         .va-vchip .ok{width:18px;height:18px;border-radius:999px;background:rgba(183,255,60,0.1);color:var(--lime,#B7FF3C);display:grid;place-items:center;flex-shrink:0}
         .va-vchip span{color:var(--ink2,#929A94)}
-        .va-vchip b{color:var(--ink,#F5F7F4);font-weight:600}
+        .va-vchip b{color:#F5F7F4;font-weight:600} /* the chip is dark: --ink is navy on this theme */
 
         /* HERO */
         .va-hero{padding:0;overflow:hidden;margin-bottom:14px;background:#111515;border:1px solid var(--line-lime)}
