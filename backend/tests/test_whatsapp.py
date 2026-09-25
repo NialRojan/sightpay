@@ -19,11 +19,31 @@ def _twilio(monkeypatch):
 def test_twilio_send(monkeypatch):
     _twilio(monkeypatch)
     monkeypatch.setattr(settings, "public_base_url", "https://sightpay.example.com")
-    route = respx.post(URL).mock(return_value=httpx.Response(201, json={"sid": "SM123"}))
-    r = send_whatsapp_message("+919811111111", "नमस्ते", "https://sightpay.example.com/media/a.wav")
-    assert (r.status, r.provider_ref) == ("sent", "SM123")
-    body = route.calls[0].request.content.decode()
-    assert "To=whatsapp%3A%2B919811111111" in body and "MediaUrl=" in body
+    route = respx.post(URL).mock(side_effect=[httpx.Response(201, json={"sid": "SM123"}),
+                                              httpx.Response(201, json={"sid": "SM124"})])
+    r = send_whatsapp_message("+919811111111", "नमस्ते", "https://sightpay.example.com/media/a.mp3")
+    assert (r.status, r.provider_ref, r.error) == ("sent", "SM123", None)
+    # WhatsApp drops the caption of a voice note, so text and audio are two messages.
+    text, audio = (c.request.content.decode() for c in route.calls)
+    assert "To=whatsapp%3A%2B919811111111" in text and "Body=" in text and "MediaUrl" not in text
+    assert "To=whatsapp%3A%2B919811111111" in audio and "MediaUrl=" in audio and "Body" not in audio
+
+
+@respx.mock
+def test_voice_note_failure_keeps_text_sent(monkeypatch):
+    _twilio(monkeypatch)
+    respx.post(URL).mock(side_effect=[httpx.Response(201, json={"sid": "SM1"}),
+                                      httpx.Response(400, json={"message": "bad media"})])
+    r = send_whatsapp_message("+91981", "hi", "https://sightpay.example.com/media/a.mp3")
+    assert (r.status, r.provider_ref) == ("sent", "SM1") and "voice note not sent" in r.error
+
+
+@respx.mock
+def test_text_failure_skips_voice_note(monkeypatch):
+    _twilio(monkeypatch)
+    route = respx.post(URL).mock(return_value=httpx.Response(400, json={"message": "not in sandbox"}))
+    r = send_whatsapp_message("+91981", "hi", "https://sightpay.example.com/media/a.mp3")
+    assert r.status == "failed" and len(route.calls) == 1
 
 
 @respx.mock
