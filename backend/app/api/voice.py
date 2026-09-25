@@ -8,7 +8,7 @@ from app.api.fse import _fse
 from app.config import settings
 from app.db import get_db
 from app.services.photos import store_media
-from app.services.sarvam import SarvamError, get_sarvam
+from app.services.sarvam import AUDIO_EXT, SarvamError, get_sarvam
 from app.services.voice import answer_query
 
 router = APIRouter(prefix="/voice", tags=["voice (Sarvam)"])
@@ -58,7 +58,7 @@ def tts(body: TtsIn):
     if client is None:
         raise HTTPException(503, "TTS needs SARVAM_API_KEY")
     try:
-        path = store_media(client.tts(body.text, body.language), "tts", ".wav")
+        path = store_media(client.tts(body.text, body.language), "tts", AUDIO_EXT)
     except SarvamError as exc:
         raise HTTPException(502, str(exc))
     except OSError as exc:

@@ -29,6 +29,7 @@ def test_tts_decodes_audio():
         return_value=httpx.Response(200, json={"audios": [base64.b64encode(b"RIFFwav").decode()]}))
     assert SarvamClient("k").tts("नमस्ते", "hi-IN") == b"RIFFwav"
     assert b'"language_code":"hi-IN"' in route.calls[0].request.content.replace(b" ", b"")
+    assert b'"output_audio_codec":"mp3"' in route.calls[0].request.content.replace(b" ", b"")
 
 
 @respx.mock

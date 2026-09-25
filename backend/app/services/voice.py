@@ -10,7 +10,7 @@ from app.services.labels import ACTION_LABELS
 from app.services.memory import get_memory
 from app.services.photos import store_media
 from app.services.rep import USABLE_STATUSES, priority_queue
-from app.services.sarvam import SarvamError, get_sarvam
+from app.services.sarvam import AUDIO_EXT, SarvamError, get_sarvam
 
 log = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def answer_query(db: Session, fse_id: int, transcript: str, language: str = "en-
         except Exception:
             log.exception("Unexpected error in voice translate, answering in English")
         try:
-            audio_path = store_media(client.tts(answer_local, language), "voice_answer", ".wav")
+            audio_path = store_media(client.tts(answer_local, language), "voice_answer", AUDIO_EXT)
         except SarvamError as exc:
             log.warning("voice TTS failed, answering with text only: %s", exc)
         except Exception:

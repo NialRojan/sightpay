@@ -21,7 +21,7 @@ def test_non_compliant_guidance_is_translated_and_voiced(db, monkeypatch):
     v = run_inline(db, make_visit(db, world, sharp_jpeg(90)).id)
     iv = v.intervention
     assert iv.message_text == "नमस्ते रमेश जी, QR आगे रखिए।"
-    assert iv.audio_url.endswith(".wav")
+    assert iv.audio_url.endswith(".mp3")
     assert (Path(settings.upload_dir) / iv.audio_path).read_bytes() == b"RIFFwav"
     assert v.notifications[0].audio_url == iv.audio_url
     assert any("sarvam" in s["summary"] for s in v.pipeline_log if s["step"] == "guidance")
