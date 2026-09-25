@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.services.impact import InterventionNotFound, merchant_impact
 from app.services.merchants import list_merchants, merchant_detail
 
 router = APIRouter(prefix="/merchants", tags=["merchants"])
@@ -18,3 +19,14 @@ def merchant(merchant_id: int, db: Session = Depends(get_db)):
     if detail is None:
         raise HTTPException(404, "Merchant not found")
     return detail
+
+
+@router.get("/{merchant_id}/impact")
+def impact(merchant_id: int, intervention_id: int | None = None, db: Session = Depends(get_db)):
+    try:
+        body = merchant_impact(db, merchant_id, intervention_id)
+    except InterventionNotFound:
+        raise HTTPException(404, "Intervention not found for this merchant")
+    if body is None:
+        raise HTTPException(404, "Merchant not found")
+    return body

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.services.analytics import build_dashboard
+from app.services.impact import portfolio_impact
 
 router = APIRouter(tags=["analytics"])
 
@@ -11,3 +12,8 @@ router = APIRouter(tags=["analytics"])
 @router.get("/analytics/dashboard")
 def dashboard(db: Session = Depends(get_db)):
     return build_dashboard(db)
+
+
+@router.get("/analytics/impact")
+def impact(db: Session = Depends(get_db)):
+    return portfolio_impact(db)

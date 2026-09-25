@@ -5,10 +5,11 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 
 from dotenv import find_dotenv, load_dotenv
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app import models
 from app.config import settings
+from app.services.impact import intervention_impact
 from app.services.labels import ACTION_LABELS
 from app.services.memory.base import MerchantContext
 from app.services.memory.sql_memory import SqlMemory, summarize
@@ -122,6 +123,11 @@ def visit_memory_document(visit: models.Visit) -> str:
         lines.append(f"Intervention: {visit.intervention.action} ({visit.intervention.message_language})")
     if visit.incentive:
         lines.append(f"Incentive: ₹{visit.incentive.amount_inr} {visit.incentive.status}")
+    session = object_session(visit)
+    if visit.intervention and session is not None:
+        r = intervention_impact(session, visit.intervention)
+        if r.status == "ok":  # a fresh intervention has no post window yet; never extrapolated
+            lines.append(f"Transaction trend after intervention: {r.change_pct:+.1f}% (observed, not causal)")
     lines.append(f"Outcome: {visit.decision or 'pending'}")
     return "\n".join(lines)
 
