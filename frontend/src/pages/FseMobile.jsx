@@ -1,3 +1,4 @@
+import { T, LanguagePicker } from '../components/Language'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Camera, Footprints, LogOut, Store, Workflow } from 'lucide-react'
@@ -205,10 +206,11 @@ export default function FseMobile() {
           <span className="wordmark">SightPay</span>
         </div>
         <span className="header-sep">/</span>
-        <span className="crumb">FSE Mobile Experience</span>
+        <span className="crumb"><T>Mobile Copilot</T></span>
+        <LanguagePicker />
         <button className="header-logout" onClick={logout}>
           <LogOut size={13} />
-          Log out
+          <T>Log out</T>
         </button>
       </header>
 
@@ -216,11 +218,9 @@ export default function FseMobile() {
         {/* Subheader banner */}
         <div className="mobile-exp-header card">
           <div>
-            <span className="pill ev">Live FSE App</span>
-            <h2>FSE Field Copilot Experience</h2>
+            <h2><T>Mobile Copilot</T></h2>
             <p className="mu">
-              The SightPay app as {identity.name || `FSE ${identity.id}`} sees it on a phone, on live backend data. Open it on a
-              phone for the full-screen version.
+              {identity.name || `FSE ${identity.id}`}
             </p>
           </div>
           <div className="mobile-nav-buttons">
@@ -363,7 +363,7 @@ export default function FseMobile() {
                 </button>
                 <button className="p-nav-item" onClick={() => nav('/manager')}>
                   <Workflow size={18} />
-                  <span>Manager</span>
+                  <span><T>Manager</T></span>
                 </button>
               </div>
             </div>

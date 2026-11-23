@@ -1,6 +1,7 @@
+import { T, useLanguage } from '../components/Language'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ChevronDown, Navigation, Search, Route, ArrowRight, SlidersHorizontal, Info, X } from 'lucide-react'
+import { Navigation, Search, Route, ArrowRight, SlidersHorizontal, Info, X } from 'lucide-react'
 import Layout from '../components/Layout'
 import { PriorityBadge, ScoreRing } from '../components/ui'
 import { getFseQueue, listFse } from '../services/fse'
@@ -68,7 +69,7 @@ function ScoreBreakdown({ open, onClose, merchant }) {
         </div>
 
         <div className="score-foot">
-          <Info size={14} color="#B7FF3C" />
+          <Info size={14} color="var(--sp-accent)" />
           <span>
             The queue is recomputed by the backend on every load from the latest usable visit, open issues, sales and
             your position. Merchants with a usable visit today are left out.
@@ -97,15 +98,18 @@ function QueueRow({ m, index, selected, onSelect }) {
       </div>
 
       <div className="reason">
-        <span className="mu xs">AI REASON</span>
-        {m.reasons?.map((r) => (
-          <div key={r}><i /> {r}</div>
-        ))}
+        {m.reasons?.[0] && <div><i /> {m.reasons[0]}</div>}
+        {m.reasons?.length > 1 && (
+          <details onClick={(event) => event.stopPropagation()}>
+            <summary><T>Why this visit?</T></summary>
+            <ul>{m.reasons.slice(1).map((reason) => <li key={reason}>{reason}</li>)}</ul>
+          </details>
+        )}
       </div>
 
       <div className="action">
-        <span className="mu xs">RECOMMENDED ACTION</span>
-        <b>{recommendedAction(m)}</b>
+        <span className="mu xs"><T>Recommended action</T></span>
+        <b><T>{recommendedAction(m)}</T></b>
         <span className="mu xs">
           Latest: {m.latest_score == null ? '—' : `${m.latest_score}/100`} · {decisionText(m.latest_decision)}
         </span>
@@ -124,7 +128,7 @@ function QueueRow({ m, index, selected, onSelect }) {
             nav(`/fse/mobile?merchant=${m.merchant_id}`)
           }}
         >
-          START VISIT <ArrowRight size={14} />
+          <T>Start visit</T> <ArrowRight size={14} />
         </button>
         <button
           className="btn"
@@ -133,7 +137,7 @@ function QueueRow({ m, index, selected, onSelect }) {
             nav(`/merchants/${m.merchant_id}`)
           }}
         >
-          VIEW 360
+          <T>View merchant</T>
         </button>
       </div>
     </article>
@@ -141,7 +145,7 @@ function QueueRow({ m, index, selected, onSelect }) {
 }
 
 function MapPinIcon() {
-  return <span style={{ color: '#B7FF3C' }}>•</span>
+  return <span style={{ color: 'var(--sp-accent)' }}>•</span>
 }
 
 // Places pins inside the grid by their real lat/lng (equirectangular projection of the queue's bounding box).
@@ -162,7 +166,8 @@ function projectPins(list) {
   }))
 }
 
-export default function PriorityQueue() {
+export default function PriorityQueue({ showGrid = false }) {
+  const { t } = useLanguage()
   const [filter, setFilter] = useState('All')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(null)
@@ -226,7 +231,7 @@ export default function PriorityQueue() {
     return true
   }), [queue, filter, query])
 
-  const pins = useMemo(() => projectPins(queue || []), [queue])
+  const pins = useMemo(() => showGrid ? projectPins(queue || []) : [], [queue, showGrid])
   const high = (queue || []).filter((m) => level(m) === 'HIGH').length
   const selectedRow = (queue || []).find((m) => m.merchant_id === selected) || null
   const nearest = pos && queue?.length ? Math.min(...queue.map((m) => m.distance_m ?? Infinity)) : null
@@ -237,33 +242,24 @@ export default function PriorityQueue() {
       <div className="pad queue-page">
         <div className="page-head">
           <div>
-            <span className="pill ev">AI FIELD PRIORITIZATION</span>
-            <h1 style={{ marginTop: 6 }}>AI Merchant Priority Queue</h1>
+            <h1><T>Priority Queue</T></h1>
             <p className="mu">
-              Next best visits for {fse?.name || `FSE #${fseId}`}
-              {fse?.territory ? ` (${fse.territory})` : ''}, ranked by the SightPay priority score.{' '}
-              {pos === undefined
-                ? 'Checking your location…'
-                : pos
-                  ? 'Distance from your current location is included.'
-                  : 'Location unavailable: distance is not used.'}
+              {fse?.name || `FSE #${fseId}`}{fse?.territory ? ` · ${fse.territory}` : ''}{' · '}
+              {t('Today')}{' · '}{t(pos === undefined ? 'Checking location…' : pos ? 'Distance included' : 'Location unavailable')}
             </p>
           </div>
           <div className="head-actions">
-            <button className="btn sel" title="The queue always covers today: merchants with a usable visit today are left out">
-              Today <ChevronDown size={15} />
-            </button>
             <button className="score-link btn" onClick={() => setScoreModalOpen(true)}>
-              <Info size={14} color="#B7FF3C" /> Explain Score
+              <Info size={14} color="var(--sp-accent)" /> <T>Explain Score</T>
             </button>
           </div>
         </div>
 
         {/* AI BANNER */}
-        <section className="card ai-banner">
+        {showGrid && <section className="card ai-banner">
           <div>
             <span className="mu sm">PRIORITIZATION ENGINE</span>
-            <h3 style={{ marginTop: 4, color: '#B7FF3C' }}>
+            <h3 style={{ marginTop: 4, color: 'var(--sp-accent)' }}>
               {queue == null
                 ? 'Loading the queue…'
                 : `${high} merchant${high === 1 ? '' : 's'} require${high === 1 ? 's' : ''} priority intervention today`}
@@ -278,7 +274,7 @@ export default function PriorityQueue() {
             <div><b>{queue ? high : '—'}</b><span>URGENT HIGH</span></div>
             <div><b>{nearest != null && Number.isFinite(nearest) ? fmtKm(nearest) : '—'}</b><span>NEAREST</span></div>
           </div>
-        </section>
+        </section>}
 
         {/* FILTERBAR */}
         <div className="filterbar">
@@ -292,27 +288,27 @@ export default function PriorityQueue() {
                 disabled={f === 'Nearby' && !pos}
                 title={f === 'Nearby' ? (pos ? 'Within 2 km of you' : 'Needs your location') : undefined}
               >
-                {f}
+                {t(f)}
               </button>
             ))}
           </div>
           <label className="search queue-search">
             <Search size={14} />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search merchant name or location..." />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t('Search merchants')} placeholder={t('Search merchants')} />
           </label>
         </div>
 
         {/* MAIN LAYOUT */}
-        <div className="queue-layout">
+        <div className={showGrid ? 'queue-layout' : undefined}>
           <div className="queue-list">
             {error && (
               <div className="card">
                 <h3>Could not load the priority queue</h3>
                 <p className="mu sm">{errText(error)}</p>
-                <button className="btn" style={{ marginTop: 10 }} onClick={() => load(pos)}>Retry</button>
+                <button className="btn" style={{ marginTop: 10 }} onClick={() => load(pos)}><T>Retry</T></button>
               </div>
             )}
-            {!error && queue == null && <div className="card mu">Loading priority queue…</div>}
+            {!error && queue == null && <div className="card mu"><T>Loading priority queue…</T></div>}
             {!error && queue && list.length === 0 && (
               <div className="card mu">
                 {queue.length === 0
@@ -331,35 +327,37 @@ export default function PriorityQueue() {
             ))}
           </div>
 
-          <aside className="queue-map card">
-            <div className="row" style={{ marginBottom: 12 }}>
-              <div>
-                <h2>Field Priority Grid</h2>
-                <span className="mu sm">Pins at real shop locations · selected merchant highlighted</span>
+          {showGrid && (
+            <aside className="queue-map card">
+              <div className="row" style={{ marginBottom: 12 }}>
+                <div>
+                  <h2>Field Priority Grid</h2>
+                  <span className="mu sm">Pins at real shop locations · selected merchant highlighted</span>
+                </div>
+                <span className="grow" />
+                <Route size={16} color="var(--sp-accent)" />
               </div>
-              <span className="grow" />
-              <Route size={16} color="#B7FF3C" />
-            </div>
 
-            <div className="fake-map">
-              <div className="map-grid" />
-              {pins.map(({ m, left, top }) => (
-                <i
-                  key={m.merchant_id}
-                  className={`map-pin ${m.merchant_id === selected ? 'selected' : ''} ${level(m).toLowerCase()}`}
-                  style={{ left: left + '%', top: top + '%' }}
-                  title={`${m.name} · priority ${m.priority}${m.distance_m != null ? ` · ${fmtKm(m.distance_m)}` : ''}`}
-                  onClick={() => setSelected(m.merchant_id)}
-                />
-              ))}
-            </div>
+              <div className="fake-map">
+                <div className="map-grid" />
+                {pins.map(({ m, left, top }) => (
+                  <i
+                    key={m.merchant_id}
+                    className={`map-pin ${m.merchant_id === selected ? 'selected' : ''} ${level(m).toLowerCase()}`}
+                    style={{ left: left + '%', top: top + '%' }}
+                    title={`${m.name} · priority ${m.priority}${m.distance_m != null ? ` · ${fmtKm(m.distance_m)}` : ''}`}
+                    onClick={() => setSelected(m.merchant_id)}
+                  />
+                ))}
+              </div>
 
-            <div className="map-legend">
-              <span><i className="dot-red" /> High Priority</span>
-              <span><i className="dot-amb" /> Medium / Low</span>
-              <span><i className="dot-lime" /> Selected</span>
-            </div>
-          </aside>
+              <div className="map-legend">
+                <span><i className="dot-red" /> High Priority</span>
+                <span><i className="dot-amb" /> Medium / Low</span>
+                <span><i className="dot-lime" /> Selected</span>
+              </div>
+            </aside>
+          )}
         </div>
 
         <ScoreBreakdown open={scoreModalOpen} onClose={() => setScoreModalOpen(false)} merchant={selectedRow} />

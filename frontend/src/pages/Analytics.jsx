@@ -1,3 +1,4 @@
+import { T } from '../components/Language'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -933,7 +934,7 @@ export default function Analytics() {
                     setReload((n) => n + 1)
                   }}
                 >
-                  Retry
+                  <T>Retry</T>
                 </button>
               )}
             </div>
@@ -962,13 +963,13 @@ export default function Analytics() {
                 </span>
 
                 <h1>
-                  Impact analytics
+                  <T>Impact analytics</T>
                 </h1>
               </div>
 
               <span className="analytics-live">
                 <i />
-                Live measurement
+                <T>Live measurement</T>
               </span>
             </div>
 
@@ -1933,7 +1934,7 @@ function AnalyticsStyles() {
 
       .analytics-mini-label {
         display: block;
-        color: #B7FF3C;
+        color: var(--sp-accent);
         font-size: 10px;
         font-weight: 700;
         letter-spacing: .11em;
@@ -1945,9 +1946,9 @@ function AnalyticsStyles() {
         display: inline-flex;
         align-items: center;
         gap: 7px;
-        border: 1px solid rgba(183,255,60,0.2);
-        background: #111515;
-        color: #B7FF3C;
+        border: 1px solid var(--sp-line);
+        background: var(--sp-tint);
+        color: var(--sp-accent);
         padding: 8px 11px;
         border-radius: 999px;
         font-size: 11px;
@@ -1958,8 +1959,7 @@ function AnalyticsStyles() {
         width: 7px;
         height: 7px;
         border-radius: 50%;
-        background: #B7FF3C;
-        box-shadow: 0 0 8px #B7FF3C;
+        background: var(--sp-accent);
       }
 
       .analytics-controls {

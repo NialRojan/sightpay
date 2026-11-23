@@ -1,3 +1,4 @@
+import { T, LanguagePicker, useLanguage } from '../components/Language'
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -5,7 +6,6 @@ import {
   Check,
   LayoutGrid,
   Languages,
-  Lock,
   MapPin,
   ShieldCheck,
   Smartphone,
@@ -31,7 +31,7 @@ const WORKSPACES = [
     icon: Smartphone,
     tag: 'Field rep',
     title: 'Field Sales Executive',
-    text: 'Pick your name to open your priority queue, merchant 360, visit evidence and the FSE mobile copilot.',
+    text: 'Choose your name to see today’s visits.',
     cta: 'Continue as field rep',
     to: '/fse',
   },
@@ -40,7 +40,7 @@ const WORKSPACES = [
     icon: LayoutGrid,
     tag: 'Manager',
     title: 'Admin / Manager Panel',
-    text: 'Review escalations, flagged visits, team coverage and impact analytics. Your name is recorded as the approver.',
+    text: 'Review flagged visits and team performance.',
     cta: 'Enter Manager Command Center',
     to: '/manager',
   },
@@ -63,6 +63,7 @@ function Logo() {
 }
 
 export default function Login() {
+  const { t } = useLanguage()
   const nav = useNavigate()
   const [params] = useSearchParams()
   const initialRole = params.get('role') === 'manager' || params.get('role') === 'fse' ? params.get('role') : getRole()
@@ -179,7 +180,7 @@ export default function Login() {
           <Logo />
 
           <div className="lg-copy">
-            <h1>Field intelligence, at the counter.</h1>
+            <h1><T>Field intelligence, at the counter.</T></h1>
             <p>
               SightPay connects merchant counter evidence, AI recommendations, and field execution into one evidence-backed product loop.
             </p>
@@ -233,11 +234,14 @@ export default function Login() {
 
       {/* RIGHT: role selection */}
       <section className="lg-form">
-        <button type="button" className="lg-back" onClick={() => nav('/')}>Back to home</button>
+        <header className="lg-header sp-header-actions">
+          <button type="button" onClick={() => nav('/')}><T>Back</T></button>
+          <LanguagePicker />
+        </header>
 
         <form className="lg-box" onSubmit={submit}>
-          <h2>Welcome to SightPay</h2>
-          <p className="lg-sub">Choose your role to proceed.</p>
+          <h2><T>Welcome to SightPay</T></h2>
+          <p className="lg-sub"><T>Choose your workspace</T></p>
 
           <div className="lg-ws" role="radiogroup" aria-label="Role">
             {WORKSPACES.map(({ id, icon: Icon, tag, title, text }) => {
@@ -253,9 +257,9 @@ export default function Login() {
                 >
                   <span className="lg-wico"><Icon size={20} strokeWidth={1.8} /></span>
                   <span className="lg-wtxt">
-                    <span className="lg-wtag">{tag}</span>
-                    <strong>{title}</strong>
-                    <small>{text}</small>
+                    <span className="lg-wtag">{t(tag)}</span>
+                    <strong>{t(title)}</strong>
+                    <small>{t(text)}</small>
                   </span>
                   <span className="lg-radio">{on && <Check size={13} strokeWidth={3} />}</span>
                 </button>
@@ -296,7 +300,7 @@ export default function Login() {
             </div>
           ) : (
             <label className="lg-field">
-              <span>Your name (recorded as the approver)</span>
+              <span><T>Your name (recorded as the approver)</T></span>
               <input
                 value={managerName}
                 onChange={(e) => setManagerNameInput(e.target.value)}
@@ -310,10 +314,9 @@ export default function Login() {
           {formError && <div className="lg-err" role="alert">{formError}</div>}
 
           <button type="submit" className="lg-go">
-            {ws.cta} <ArrowRight size={16} />
+            {t(ws.cta)} <ArrowRight size={16} />
           </button>
 
-          <div className="lg-foot"><Lock size={13} /> Paytm Field Operations Intelligence Workspace</div>
         </form>
       </section>
     </div>

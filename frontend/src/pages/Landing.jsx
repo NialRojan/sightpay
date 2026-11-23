@@ -1,3 +1,4 @@
+import { T, LanguagePicker } from '../components/Language'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -454,7 +455,7 @@ function IntelligenceStack() {
               <line key={`${x}${y}`} x1="130" y1="70" x2={x} y2={y} className="lp-gline" />
             ))}
             <circle cx="130" cy="70" r="20" fill="#1F5BFF" />
-            <text x="130" y="74" textAnchor="middle" className="lp-g-c">Merchant</text>
+            <text x="130" y="74" textAnchor="middle" className="lp-g-c"><T>Merchant</T></text>
             {[[38, 34, 'Rep'], [222, 34, 'Visits'], [42, 108, 'Issues'], [220, 108, 'Competitor']].map(([x, y, t]) => (
               <g key={t}>
                 <circle cx={x} cy={y} r="14" fill="#fff" stroke="#1F5BFF" strokeWidth="1.8" />
@@ -541,14 +542,15 @@ export default function Landing() {
       <header className={`lp-nav ${scrolled ? 'scrolled' : ''}`}>
         <Logo />
         <nav>
-          <a href="#product" onClick={(e) => { e.preventDefault(); go('product') }}>Product</a>
-          <a href="#how" onClick={(e) => { e.preventDefault(); go('how') }}>How it works</a>
-          <a href="#stack" onClick={(e) => { e.preventDefault(); go('stack') }}>AI stack</a>
-          <a href="/login?role=manager" onClick={(e) => { e.preventDefault(); nav('/login?role=manager') }}>For managers</a>
+          <a href="#product" onClick={(e) => { e.preventDefault(); go('product') }}><T>Product</T></a>
+          <a href="#how" onClick={(e) => { e.preventDefault(); go('how') }}><T>How it works</T></a>
+          <a href="#stack" onClick={(e) => { e.preventDefault(); go('stack') }}><T>AI stack</T></a>
+          <a href="/login?role=manager" onClick={(e) => { e.preventDefault(); nav('/login?role=manager') }}><T>For managers</T></a>
         </nav>
         <div className="lp-nav-cta">
-          <button className="lp-btn ghost" onClick={() => nav('/login')}>Sign in</button>
-          <button className="lp-btn primary" onClick={() => nav('/login')}>Launch SightPay</button>
+          <LanguagePicker />
+          <button className="lp-btn ghost" onClick={() => nav('/login')}><T>Sign in</T></button>
+          <button className="lp-btn primary" onClick={() => nav('/login')}><T>Launch SightPay</T></button>
         </div>
       </header>
 
@@ -563,16 +565,16 @@ export default function Landing() {
 
         <div className="lp-hero-in">
           <div className="lp-hero-copy">
-            <h1>Turn every field visit into measurable impact.</h1>
+            <h1><T>Turn every field visit into measurable impact.</T></h1>
             <p className="lp-lead">
               SightPay gives field teams the intelligence to see what is happening at the merchant counter, verify the
               visit, act on the right intervention, and measure what changed.
             </p>
             <div className="lp-cta-row">
               <button className="lp-btn primary lg" onClick={() => nav('/login')}>
-                Explore SightPay <ArrowRight size={16} />
+                <T>Explore SightPay</T> <ArrowRight size={16} />
               </button>
-              <button className="lp-btn lg" onClick={() => nav('/login?role=fse')}>View field dashboard</button>
+              <button className="lp-btn lg" onClick={() => nav('/login?role=fse')}><T>View field dashboard</T></button>
             </div>
 
             <div className="lp-stats">
@@ -632,9 +634,9 @@ export default function Landing() {
           <p>SightPay connects every visit, decision and intervention into one operational feedback loop.</p>
           <div className="lp-cta-row center">
             <button className="lp-btn light lg" onClick={() => nav('/login')}>
-              Enter SightPay <ArrowRight size={16} />
+              <T>Enter SightPay</T> <ArrowRight size={16} />
             </button>
-            <button className="lp-btn outline lg" onClick={() => nav('/login?role=manager')}>For managers</button>
+            <button className="lp-btn outline lg" onClick={() => nav('/login?role=manager')}><T>For managers</T></button>
           </div>
         </Reveal>
       </section>

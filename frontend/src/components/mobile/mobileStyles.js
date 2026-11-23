@@ -942,8 +942,9 @@ export const MOBILE_CSS = `
 
 /* Phones: the app fills the screen instead of sitting in the simulated frame. */
 @media (max-width: 600px) {
-  .page-header-bar, .mobile-exp-header, .phone-notch { display: none; }
+  .page-header-bar { height: 54px; gap: 8px; padding-inline: 12px; }
+  .page-header-bar .header-sep, .page-header-bar .crumb, .mobile-exp-header, .phone-notch { display: none; }
   .mobile-exp-container, .phone-wrapper { padding: 0; gap: 0; }
-  .phone-frame { width: 100vw; height: 100vh; height: 100dvh; border: 0; border-radius: 0; box-shadow: none; }
+  .phone-frame { width: 100vw; height: calc(100vh - 54px); height: calc(100dvh - 54px); border: 0; border-radius: 0; box-shadow: none; }
 }
 `

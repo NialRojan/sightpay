@@ -1,21 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
 body,
 #root {
   min-height: 100%;
-  background-color: #070909;
-  color: #F5F7F4;
+  background-color: #f3f6fc;
+  color: #101c36;
 }
 
 body {
   margin: 0;
   font-family: Inter, system-ui, sans-serif;
-  background-color: #070909;
-  color: #F5F7F4;
   -webkit-font-smoothing: antialiased;
 }

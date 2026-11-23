@@ -1,3 +1,4 @@
+import { T, useLanguage } from '../Language'
 // M1 identity, M2 home (coverage + performance + next best) and M3 priority queue, on real backend data.
 import { ArrowLeft, ArrowRight, ChevronRight, MapPin, Navigation, ShieldCheck, Sparkles, Zap } from 'lucide-react'
 import { fmtInr, fmtKm, priorityLevel, DECISION_LABEL } from '../../services/format'
@@ -44,10 +45,10 @@ export function IdentityScreen({ fse, gps, onEnter, onSwitch }) {
         </div>
 
         <button className="btn p m-full-btn" onClick={onEnter}>
-          ENTER FIELD WORKSPACE <ArrowRight size={16} />
+          <T>Open today’s plan</T> <ArrowRight size={16} />
         </button>
         <button className="btn m-full-btn" onClick={onSwitch}>
-          Switch rep
+          <T>Switch rep</T>
         </button>
       </div>
 
@@ -72,6 +73,7 @@ function ReasonList({ reasons }) {
 
 // M2: GET /fse/{id}/summary + the queue (alerts).
 export function HomeScreen({ fse, summary, queue, error, onRetry, onOpenMerchant, onQueue, onIdentity }) {
+  const { t } = useLanguage()
   const firstName = (summary?.fse?.name || fse?.name || '').split(' ')[0]
   const cov = summary?.coverage
   const perf = summary?.performance
@@ -82,9 +84,9 @@ export function HomeScreen({ fse, summary, queue, error, onRetry, onOpenMerchant
     <div className="m-screen m2-screen">
       <div className="m-header">
         <div>
-          <span className="mu xs">WELCOME BACK · {(summary?.fse?.territory || fse?.territory || '').toUpperCase()}</span>
+          <span className="mu xs">{(summary?.fse?.territory || fse?.territory || '').toUpperCase()}</span>
           <h2>
-            {greeting()}, {firstName || 'there'}
+            {t(greeting())}{firstName ? `, ${firstName}` : ''}
           </h2>
         </div>
         <div className="m-avatar-sm" onClick={onIdentity} role="button">
@@ -97,43 +99,11 @@ export function HomeScreen({ fse, summary, queue, error, onRetry, onOpenMerchant
 
       {summary && (
         <>
-          {/* Coverage KPIs (30 days) */}
-          <div className="m2-kpis">
-            <div className="m2-kpi">
-              <b className="lime">
-                {cov.visited} / {cov.assigned}
-              </b>
-              <span>COVERED ({pct(cov.coverage_pct)})</span>
-            </div>
-            <div className="m2-kpi">
-              <b>{fmtInr(perf.incentives_inr)}</b>
-              <span>INCENTIVES</span>
-            </div>
-            <div className="m2-kpi">
-              <b>{perf.avg_authenticity == null ? '—' : Math.round(perf.avg_authenticity)}</b>
-              <span>AVG AUTHENTICITY</span>
-            </div>
-          </div>
-          <div className="m2-kpis">
-            <div className="m2-kpi">
-              <b>{perf.visits}</b>
-              <span>VISITS (30D)</span>
-            </div>
-            <div className="m2-kpi">
-              <b>{pct(perf.compliant_pct)}</b>
-              <span>COMPLIANT</span>
-            </div>
-            <div className="m2-kpi">
-              <b>{perf.conversions}</b>
-              <span>CONVERSIONS</span>
-            </div>
-          </div>
-
           {/* Next Best Visit */}
           {next ? (
             <div className="m2-next-card">
               <div className="m2-next-badge">
-                <Sparkles size={13} /> AI NEXT BEST VISIT
+                <Sparkles size={13} /> <T>Next Best Visit</T>
               </div>
               <h3>{next.name}</h3>
               <div className="m2-meta">
@@ -153,26 +123,25 @@ export function HomeScreen({ fse, summary, queue, error, onRetry, onOpenMerchant
               </div>
 
               <button className="btn p m-full-btn" onClick={() => onOpenMerchant(next.merchant_id)}>
-                <Navigation size={15} /> START VISIT
+                <Navigation size={15} /> <T>Start visit</T>
               </button>
             </div>
           ) : (
             <div className="m2-next-card">
               <div className="m2-next-badge">
-                <Sparkles size={13} /> AI NEXT BEST VISIT
+                <Sparkles size={13} /> <T>Next Best Visit</T>
               </div>
-              <h3>All merchants visited today</h3>
-              <span className="mu sm">Nothing left in your queue for today.</span>
+              <h3><T>No visits left today.</T></h3>
             </div>
           )}
 
           {/* Priority Alerts: queue entries with an open issue */}
           <div className="m2-alerts">
             <div className="m2-alert-head">
-              <span>PRIORITY ALERTS</span>
-              <span className="lnk" onClick={onQueue}>
-                Queue ({queue ? queue.length : '…'})
-              </span>
+              <span><T>Priority alerts</T></span>
+              <button className="lnk" onClick={onQueue}>
+                <T>Priority Queue</T> ({queue ? queue.length : '…'})
+              </button>
             </div>
             {queue && alerts.length === 0 && <span className="mu sm">No open issues in your queue.</span>}
             {alerts.slice(0, 4).map((q) => (
@@ -186,6 +155,43 @@ export function HomeScreen({ fse, summary, queue, error, onRetry, onOpenMerchant
               </div>
             ))}
           </div>
+          <details className="sp-disclosure">
+            <summary><T>Activity and performance</T></summary>
+            <div className="sp-disclosure-content">
+              {/* Coverage KPIs (30 days) */}
+              <div className="m2-kpis">
+                <div className="m2-kpi">
+                  <b className="lime">
+                    {cov.visited} / {cov.assigned}
+                  </b>
+                  <span>COVERED ({pct(cov.coverage_pct)})</span>
+                </div>
+                <div className="m2-kpi">
+                  <b>{fmtInr(perf.incentives_inr)}</b>
+                  <span>INCENTIVES</span>
+                </div>
+                <div className="m2-kpi">
+                  <b>{perf.avg_authenticity == null ? '—' : Math.round(perf.avg_authenticity)}</b>
+                  <span>AVG AUTHENTICITY</span>
+                </div>
+              </div>
+              <div className="m2-kpis">
+                <div className="m2-kpi">
+                  <b>{perf.visits}</b>
+                  <span>VISITS (30D)</span>
+                </div>
+                <div className="m2-kpi">
+                  <b>{pct(perf.compliant_pct)}</b>
+                  <span>COMPLIANT</span>
+                </div>
+                <div className="m2-kpi">
+                  <b>{perf.conversions}</b>
+                  <span>CONVERSIONS</span>
+                </div>
+              </div>
+
+            </div>
+          </details>
         </>
       )}
     </div>
@@ -228,7 +234,7 @@ export function QueueScreen({ queue, error, gps, onRetry, onBack, onOpenMerchant
           >
             {idx === 0 && (
               <div className="m2-next-badge">
-                <Sparkles size={13} /> AI NEXT BEST VISIT
+                <Sparkles size={13} /> <T>Next Best Visit</T>
               </div>
             )}
             <div className="m3-top">

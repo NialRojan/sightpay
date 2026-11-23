@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import './styles/sightpay.css'
+import './styles/product.css'
 
 import Landing from './pages/Landing'
 import Login from './pages/Login'
@@ -20,7 +21,7 @@ export default function SightPayRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/fse" element={<Fse />} />
       <Route path="/fse/mobile" element={<FseMobile />} />
-      <Route path="/queue" element={<PriorityQueue />} />
+      <Route path="/queue" element={<PriorityQueue showGrid />} />
       <Route path="/fse/queue" element={<PriorityQueue />} />
       <Route path="/merchants/:id" element={<MerchantDetail />} />
       <Route path="/fse/merchants" element={<TopMerchantRedirect />} />
