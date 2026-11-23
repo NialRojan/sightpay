@@ -1,3 +1,4 @@
+import { T } from '../Language'
 // M5: capture a counter photo, attach GPS, POST /visits (analyze=true) and watch pipeline_log[] live.
 import { useEffect, useState } from 'react'
 import { ArrowLeft, Camera, Check, ImagePlus, Loader2, MapPin, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react'
@@ -38,8 +39,8 @@ export function CaptureScreen({ merchant, gps, onRefreshGps, visit, submitting, 
         <button className="m-back" onClick={onBack}>
           <ArrowLeft size={18} />
         </button>
-        <h3>Capture Evidence</h3>
-        <span className="pill ev">AI Audit</span>
+        <h3><T>Capture Evidence</T></h3>
+        <span className="pill ev"><T>AI Audit</T></span>
       </div>
       {merchant && <p className="mu sm m-sub">{merchant.name} · {merchant.owner_name}</p>}
 
@@ -61,7 +62,7 @@ export function CaptureScreen({ merchant, gps, onRefreshGps, visit, submitting, 
           <img className="m5-preview" src={photo.url} alt="Counter photo to submit" />
         ) : (
           <div className="m5-evidence-unavailable">
-            <Camera size={32} color="#B7FF3C" />
+            <Camera size={32} color="var(--sp-accent)" />
             <b>Merchant Counter Photo</b>
             <span>Photograph the billing counter: Paytm QR, Soundbox and any competitor QR.</span>
           </div>
@@ -119,7 +120,7 @@ export function CaptureScreen({ merchant, gps, onRefreshGps, visit, submitting, 
       {!gps.pos && !gps.pending && !locked && (
         <div className="m5-capture-btns">
           <button className="btn" onClick={onRefreshGps}>
-            <RotateCcw size={14} /> Retry GPS
+            <RotateCcw size={14} /> <T>Retry GPS</T>
           </button>
           <button className={`btn ${useDemo ? 'p' : ''}`} onClick={() => setUseDemo((v) => !v)} aria-pressed={useDemo}>
             <MapPin size={14} /> {useDemo ? 'Demo location ON' : 'Demo: use shop location'}
@@ -132,7 +133,7 @@ export function CaptureScreen({ merchant, gps, onRefreshGps, visit, submitting, 
       {!visit && (
         <button className="btn p m-full-btn" disabled={!canSubmit} onClick={submit}>
           {submitting ? <Loader2 size={16} className="m-spin" /> : <Sparkles size={16} />}
-          {submitting ? 'UPLOADING…' : 'SUBMIT & ANALYZE'}
+          <T>{submitting ? 'Uploading…' : 'Submit and analyze'}</T>
         </button>
       )}
 
@@ -226,7 +227,7 @@ function PipelineJourney({ visit, onOutcome, onNewCapture }) {
 
       {done && auth && (
         <div className="m5-authenticity">
-          <ShieldCheck size={16} color="#B7FF3C" />
+          <ShieldCheck size={16} color="var(--sp-accent)" />
           <div>
             <b>Multi-Signal Authenticity: {auth.score} / 100 · {auth.verdict}</b>
             <span className="mu xs" style={{ display: 'block' }}>

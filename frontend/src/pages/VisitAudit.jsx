@@ -1,3 +1,4 @@
+import { T } from '../components/Language'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { AlertTriangle, Check, ChevronRight, Image as ImageIcon, MapPin, Play, RefreshCw, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
@@ -26,17 +27,17 @@ export default function VisitAudit() {
 
   const flash = (text) => { setToast(text); setTimeout(() => setToast(null), 4200) }
 
-  if (loading) return <Layout crumb="Visit audit"><div className="pad mu">Loading visit evidence…</div></Layout>
+  if (loading) return <Layout crumb="Visit Audit"><div className="pad mu">Loading visit evidence…</div></Layout>
   if (error || !v) {
     return (
-      <Layout crumb="Visit audit">
+      <Layout crumb="Visit Audit">
         <div className="pad">
           <div className="card">
             <h2>Visit #{id} could not be loaded</h2>
             <p className="mu">{errorText(error) || 'No data returned.'}</p>
             <div className="row" style={{ marginTop: 14, justifyContent: 'flex-start', gap: 10 }}>
-              <button className="btn" onClick={() => window.location.reload()}><RefreshCw size={15} /> Retry</button>
-              <button className="btn" onClick={() => nav('/fse/audits')}>AI Audits</button>
+              <button className="btn" onClick={() => window.location.reload()}><RefreshCw size={15} /> <T>Retry</T></button>
+              <button className="btn" onClick={() => nav('/fse/audits')}><T>AI Audits</T></button>
             </div>
           </div>
         </div>
@@ -89,23 +90,23 @@ export default function VisitAudit() {
     <Layout crumb="Visit Audit">
       <style>{`
         .va-crumb{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2,#929A94);margin-bottom:16px}
-        .va-crumb span{cursor:pointer}.va-crumb span:hover{color:var(--lime,#B7FF3C)}
+        .va-crumb span{cursor:pointer}.va-crumb span:hover{color:var(--sp-accent)}
         .va-crumb b{font-weight:400;opacity:.5}
 
         .va-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:18px;flex-wrap:wrap}
-        .va-eyebrow{font-size:11px;color:var(--lime,#B7FF3C);font-weight:700;letter-spacing:0.05em;margin-bottom:4px}
+        .va-eyebrow{font-size:11px;color:var(--sp-accent);font-weight:700;letter-spacing:0.05em;margin-bottom:4px}
         .va-head h1{font-family:Sora,sans-serif;font-size:28px;font-weight:700;letter-spacing:-.02em;color:var(--ink,#F5F7F4)}
         .va-head-actions{display:flex;align-items:center;gap:10px}
-        .va-verified{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--lime,#B7FF3C);background:rgba(183,255,60,0.1);border:1px solid rgba(183,255,60,0.25);border-radius:999px;padding:6px 14px}
+        .va-verified{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--sp-accent);background:var(--sp-success-bg);border:1px solid var(--sp-success-line);border-radius:999px;padding:6px 14px}
 
         .va-vrow{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
-        .va-vchip{display:inline-flex;align-items:center;gap:6px;background:#111515;border:1px solid rgba(245,247,244,0.08);border-radius:999px;padding:7px 12px 7px 8px;font-size:12px}
-        .va-vchip .ok{width:18px;height:18px;border-radius:999px;background:rgba(183,255,60,0.1);color:var(--lime,#B7FF3C);display:grid;place-items:center;flex-shrink:0}
+        .va-vchip{display:inline-flex;align-items:center;gap:6px;background:var(--mist);border:1px solid var(--line);border-radius:999px;padding:7px 12px 7px 8px;font-size:12px}
+        .va-vchip .ok{width:18px;height:18px;border-radius:999px;background:var(--sp-success-bg);color:var(--sp-accent);display:grid;place-items:center;flex-shrink:0}
         .va-vchip span{color:var(--ink2,#929A94)}
-        .va-vchip b{color:#F5F7F4;font-weight:600} /* the chip is dark: --ink is navy on this theme */
+        .va-vchip b{color:var(--ink);font-weight:600}
 
         /* HERO */
-        .va-hero{padding:0;overflow:hidden;margin-bottom:14px;background:#111515;border:1px solid var(--line-lime)}
+        .va-hero{padding:0;overflow:hidden;margin-bottom:14px;background:var(--card);border:1px solid var(--line)}
         .va-hero-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:0}
         @media (max-width:900px){.va-hero-grid{grid-template-columns:1fr}}
 
@@ -199,15 +200,14 @@ export default function VisitAudit() {
       `}</style>
       <div className="pad">
         <div className="va-crumb">
-          <span onClick={() => nav('/queue')}>Priority Queue</span><b>/</b>
-          <span onClick={() => nav(`/merchants/${v.merchant_id}`)}>{v.merchant_name}</span><b>/</b>
+          <Link to="/queue"><T>Priority Queue</T></Link><b aria-hidden="true">/</b>
+          <Link to={`/merchants/${v.merchant_id}`}>{v.merchant_name}</Link><b aria-hidden="true">/</b>
           <span>Visit Audit #{v.id}</span>
         </div>
 
         <div className="va-head">
           <div>
-            <div className="va-eyebrow">ENTERPRISE FIELD EVIDENCE</div>
-            <h1>Visit Audit & Verification</h1>
+            <h1><T>Visit Audit & Verification</T></h1>
             <p className="mu top16">
               <Link to={`/merchants/${v.merchant_id}`} style={{ color: 'inherit' }}>{v.merchant_name}</Link>
               {' · '}Received {fmtDate(v.received_at)} · {fmtTime(v.received_at)}
@@ -268,7 +268,7 @@ export default function VisitAudit() {
                 <div className="va-detect-chip fail" style={{ marginTop: 28 }}><ImageIcon size={12} /> No photo: historical visit</div>
               )}
 
-              <div className="va-score" style={{ background: `conic-gradient(#B7FF3C ${(score ?? 0) * 3.6}deg, rgba(245,247,244,0.1) 0deg)` }}>
+              <div className="va-score" style={{ background: `conic-gradient(var(--blue) ${(score ?? 0) * 3.6}deg, var(--line) 0deg)` }}>
                 <div className="va-score-inner">
                   <b>{score ?? '—'}</b>
                   <span>of 100</span>
@@ -286,8 +286,8 @@ export default function VisitAudit() {
 
             <div className="va-side">
               <div className="va-side-head">
-                <h2>Counter Vision Rubric</h2>
-                <Sparkles size={16} color="#B7FF3C" />
+                <h2><T>Counter Vision Rubric</T></h2>
+                <Sparkles size={16} color="var(--blue)" />
               </div>
               <span className="mu sm">
                 {audit ? `${score} of 100 QR visibility score — evaluated by Vision AI (${audit.provider || 'unknown provider'})`
@@ -329,69 +329,75 @@ export default function VisitAudit() {
                 <p>{decisionText}</p>
               </div>
               <button className="btn p" onClick={() => nav(`/audits/${v.id}`)} disabled={!audit}>
-                View AI Audit <ChevronRight size={16} />
+                <T>View AI Audit</T> <ChevronRight size={16} />
               </button>
             </div>
           </div>
         </section>
 
         {/* Evidence timeline + authenticity */}
-        <section className="va-lower">
-          <div className="card">
-            <div className="row" style={{ marginBottom: 12 }}>
-              <div><h2>Enterprise Evidence Chain</h2><span className="mu sm">Pipeline log of this visit{analyzing ? ' · live' : ''}</span></div>
-              <ShieldCheck size={16} color="#B7FF3C" />
-            </div>
-            <div className="va-chain">
-              {log.map((e, i) => (
-                <div className="va-chain-item" key={`${e.step}-${i}`}>
-                  <div className="va-chain-dot">{BAD_STEPS.has(e.step) ? <X size={11} /> : <Check size={11} />}</div>
-                  <div><b>{fmtTime(e.at)} · {STEP_LABEL[e.step] || e.step}</b><span style={{ display: 'block' }}>{e.summary}</span></div>
-                  {i < log.length - 1 && <div className="va-chain-line" />}
+        <details className="sp-disclosure va-more" open={analyzing || undefined}>
+          <summary><T>Evidence details</T></summary>
+          <div className="sp-disclosure-content">
+            <section className="va-lower">
+              <div className="card">
+                <div className="row" style={{ marginBottom: 12 }}>
+                  <div><h2><T>Visit timeline</T></h2><span className="mu sm">Pipeline log of this visit{analyzing ? ' · live' : ''}</span></div>
+                  <ShieldCheck size={16} color="var(--blue)" />
                 </div>
-              ))}
-              {!log.length && (
-                <span className="mu sm">
-                  {v.status === 'submitted' ? 'Not analyzed yet: run analysis to start the pipeline.'
-                    : analyzing ? 'Waiting for the first pipeline step…' : 'No pipeline log: this is a seeded historical visit.'}
-                </span>
-              )}
-            </div>
-          </div>
+                <div className="va-chain">
+                  {log.map((e, i) => (
+                    <div className="va-chain-item" key={`${e.step}-${i}`}>
+                      <div className="va-chain-dot">{BAD_STEPS.has(e.step) ? <X size={11} /> : <Check size={11} />}</div>
+                      <div><b>{fmtTime(e.at)} · {STEP_LABEL[e.step] || e.step}</b><span style={{ display: 'block' }}>{e.summary}</span></div>
+                      {i < log.length - 1 && <div className="va-chain-line" />}
+                    </div>
+                  ))}
+                  {!log.length && (
+                    <span className="mu sm">
+                      {v.status === 'submitted' ? 'Not analyzed yet: run analysis to start the pipeline.'
+                        : analyzing ? 'Waiting for the first pipeline step…' : 'No pipeline log: this is a seeded historical visit.'}
+                    </span>
+                  )}
+                </div>
+              </div>
 
-          <div className="card">
-            <div className="row">
-              <h2>Visit Authenticity Score</h2>
-            </div>
-            <div className="va-auth-top">
-              <b>{auth.score ?? '—'}</b><span>/100 · {verdict || 'not scored yet'} · combined evidence signals</span>
-            </div>
-            <div className="va-signals">
-              {signals.map((s) => (
-                <div key={s.signal}>
-                  <span>{signalLabel(s.signal)} — {s.detail}</span>
-                  <b className={s.status === 'fail' ? 'red' : s.status === 'warn' ? 'amb' : undefined}>
-                    {s.status}{s.penalty ? ` (−${s.penalty})` : ''}
-                  </b>
+              <div className="card">
+                <div className="row">
+                  <h2><T>Visit Authenticity Score</T></h2>
                 </div>
-              ))}
-              {signals.length > 0 && (
-                <div><span>100 − {penalties} penalty points</span><b>= {Math.max(0, 100 - penalties)}{Math.max(0, 100 - penalties) !== auth.score ? ` (recorded ${auth.score})` : ''}</b></div>
-              )}
-              {!signals.length && <div><span>No per-signal breakdown recorded for this visit</span><b>—</b></div>}
-            </div>
-            {fraudError && <p className="va-auth-note red">Fraud breakdown unavailable: {errorText(fraudError)}</p>}
-            <p className="va-auth-note">
-              Score = 100 minus the penalties of combined evidence signals. ≥ 70 VERIFIED · 30–69 review required (escalated
-              to a manager) · below 30 or a reused photo BLOCKED. No individual signal proves authenticity on its own.
-            </p>
+                <div className="va-auth-top">
+                  <b>{auth.score ?? '—'}</b><span>/100 · {verdict || 'not scored yet'} · combined evidence signals</span>
+                </div>
+                <div className="va-signals">
+                  {signals.map((s) => (
+                    <div key={s.signal}>
+                      <span>{signalLabel(s.signal)} — {s.detail}</span>
+                      <b className={s.status === 'fail' ? 'red' : s.status === 'warn' ? 'amb' : undefined}>
+                        {s.status}{s.penalty ? ` (−${s.penalty})` : ''}
+                      </b>
+                    </div>
+                  ))}
+                  {signals.length > 0 && (
+                    <div><span>100 − {penalties} penalty points</span><b>= {Math.max(0, 100 - penalties)}{Math.max(0, 100 - penalties) !== auth.score ? ` (recorded ${auth.score})` : ''}</b></div>
+                  )}
+                  {!signals.length && <div><span>No per-signal breakdown recorded for this visit</span><b>—</b></div>}
+                </div>
+                {fraudError && <p className="va-auth-note red">Fraud breakdown unavailable: {errorText(fraudError)}</p>}
+                <p className="va-auth-note">
+                  Score = 100 minus the penalties of combined evidence signals. ≥ 70 VERIFIED · 30–69 review required (escalated
+                  to a manager) · below 30 or a reused photo BLOCKED. No individual signal proves authenticity on its own.
+                </p>
+              </div>
+            </section>
+
           </div>
-        </section>
+        </details>
 
         {/* Automation pipeline + merchant guidance + actions */}
         <section className="card">
           <div className="row">
-            <div><div className="va-eyebrow">SARVAM + N8N AUTOMATION PIPELINE</div><h2>Merchant Guidance Output</h2></div>
+            <h2><T>Merchant guidance</T></h2>
             <span className="pill ev">Language: {iv ? langLabel(iv.message_language) : '—'}</span>
           </div>
 
@@ -476,7 +482,7 @@ export default function VisitAudit() {
 
       {toast && (
         <div className="va-toast">
-          <AlertTriangle size={15} color="#B7FF3C" /> {toast}
+          <AlertTriangle size={15} color="var(--blue)" /> {toast}
           <button onClick={() => setToast(null)} style={{ background: 'none', border: 0, color: '#929A94', cursor: 'pointer' }}><X size={14} /></button>
         </div>
       )}

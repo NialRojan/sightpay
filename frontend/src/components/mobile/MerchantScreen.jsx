@@ -1,3 +1,4 @@
+import { T } from '../Language'
 // M4: one merchant. GET /merchants/{id} (+ its latest visit for the Soundbox cell) and GET /merchants/{id}/impact.
 import { ArrowLeft, Brain, Camera, Compass, MapPin, TrendingUp } from 'lucide-react'
 import { DECISION_LABEL, fmtDate, fmtPct, priorityLevel } from '../../services/format'
@@ -48,7 +49,7 @@ export function MerchantScreen({ detail, latestVisit, impact, impactError, error
 
         <div className="m4-geofence">
           <div className="m4-geo-icon">
-            <Compass size={18} color="#B7FF3C" />
+            <Compass size={18} color="var(--sp-accent)" />
           </div>
           {gps.pos ? (
             <div>
@@ -116,7 +117,7 @@ export function MerchantScreen({ detail, latestVisit, impact, impactError, error
         <ObservedChange impact={impact} error={impactError} />
 
         <button className="btn p m-full-btn top16" onClick={onCapture}>
-          <Camera size={16} /> START AUDIT & CAPTURE
+          <Camera size={16} /> <T>Capture photo</T>
         </button>
       </div>
     </div>
@@ -129,7 +130,7 @@ function Head({ onBack, pill }) {
       <button className="m-back" onClick={onBack}>
         <ArrowLeft size={18} />
       </button>
-      <h3>Merchant Visit</h3>
+      <h3><T>Merchant Visit</T></h3>
       {pill && <span className={`pill ${pill}`}>{pill}</span>}
     </div>
   )

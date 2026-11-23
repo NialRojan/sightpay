@@ -1,10 +1,11 @@
 import { BrowserRouter } from 'react-router-dom'
 import SightPayRoutes from './SightPayRoutes'
+import { LanguageProvider } from './components/Language'
 
 export default function App() {
   return (
     <BrowserRouter>
-      <SightPayRoutes />
+      <LanguageProvider><SightPayRoutes /></LanguageProvider>
     </BrowserRouter>
   )
 }

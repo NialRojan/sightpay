@@ -1,3 +1,4 @@
+import { T } from '../components/Language'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
@@ -236,7 +237,7 @@ export default function Manager() {
         <div className="mg-head">
           <div>
             <span className="pill ev">OPERATIONS INTELLIGENCE</span>
-            <h1 style={{ marginTop: 6 }}>Manager Command Center</h1>
+            <h1 style={{ marginTop: 6 }}><T>Manager Command Center</T></h1>
             <p className="mu">Monitor field activity, multi-signal evidence, exceptions and automation workflows across regions.</p>
           </div>
           <div className="mg-head-actions">
@@ -305,7 +306,7 @@ export default function Manager() {
                 <h2>Exceptions Requiring Attention</h2>
                 <small>Escalated visits · {openCount} open, {sortedEsc.length - openCount} resolved</small>
               </div>
-              <span className="mg-ico"><ShieldAlert size={17} color="#B7FF3C" /></span>
+              <span className="mg-ico"><ShieldAlert size={17} color="var(--sp-accent)" /></span>
             </div>
 
             <ErrorLine error={escErr} what="escalations" />
@@ -377,7 +378,7 @@ export default function Manager() {
                   <small className="mu">{fmtDate(v.received_at)} {fmtTime(v.received_at)}</small>
                 </div>
                 <Link className="mg-btn" to={`/visits/${v.id}`}>
-                  Evidence <ChevronRight size={14} />
+                  <T>Evidence</T> <ChevronRight size={14} />
                 </Link>
               </div>
             ))}

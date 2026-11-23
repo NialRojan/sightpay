@@ -1,3 +1,4 @@
+import { T } from './Language'
 import { Link } from 'react-router-dom'
 import { TrendingUp, TrendingDown, CircleCheck, Clock, ShieldCheck, ChevronRight, AlertTriangle } from 'lucide-react'
 
@@ -16,11 +17,11 @@ export const Logo = ({ size = 26 }) => (
       <circle cx="16" cy="16" r="2.2" fill="#FFFFFF" />
       <path d="M16 3.5v4M16 24.5v4M3.5 16h4M24.5 16h4" stroke="#FFFFFF" strokeWidth="2.2" strokeLinecap="round" />
     </svg>
-    <span style={{ color: '#0A1B3D', fontWeight: 700 }}>Sight<span style={{ color: BLUE }}>Pay</span></span>
+    <span>Sight<b>Pay</b></span>
   </Link>
 )
 
-export const PriorityBadge = ({ level }) => <span className={`pill ${level}`}>{level}</span>
+export const PriorityBadge = ({ level }) => <span className={`pill ${level}`}><T>{({ HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' })[level] || level}</T></span>
 
 export const Trend = ({ v }) => (
   <span className={`trend ${v < 0 ? 'dn' : 'up'}`}>
@@ -124,28 +125,30 @@ export const MapView = ({ points, done, total, priority }) => {
 // Rows: {id, name, pri, km, qr, trend}. km/qr/trend may be null ("—"). Optional: `trendLabel` renames the last
 // column and `m.trendText` fills it when there is no numeric trend; `onRowClick(m)` makes rows clickable.
 export const PriorityTable = ({ rows, trendLabel = 'Trend', onRowClick }) => (
-  <table className="tbl">
-    <thead>
-      <tr><th>Merchant</th><th>Priority</th><th>Distance</th><th>QR Score</th><th>{trendLabel}</th></tr>
-    </thead>
-    <tbody>
-      {rows.map((m) => (
-        <tr
-          key={m.id}
-          onClick={onRowClick ? () => onRowClick(m) : undefined}
-          style={onRowClick ? { cursor: 'pointer' } : undefined}
-        >
-          <td><b>{m.name}</b></td>
-          <td><PriorityBadge level={m.pri} /></td>
-          <td className="mu">{m.km == null || m.km === '—' ? '—' : `${m.km} km`}</td>
-          <td>
-            {m.qr == null ? <span className="mu">—</span> : <><span className="qrbar"><i style={{ width: m.qr + '%' }} /></span> {m.qr}</>}
-          </td>
-          <td>{typeof m.trend === 'number' ? <Trend v={m.trend} /> : <span className="mu">{m.trendText ?? '—'}</span>}</td>
-        </tr>
-      ))}
-    </tbody>
-  </table>
+  <div className="table-scroll" role="region" aria-label="Merchant priorities" tabIndex={0}>
+    <table className="tbl">
+      <thead>
+        <tr><th><T>Merchant</T></th><th><T>Priority</T></th><th><T>Distance</T></th><th><T>QR Score</T></th><th><T>{trendLabel}</T></th></tr>
+      </thead>
+      <tbody>
+        {rows.map((m) => (
+          <tr
+            key={m.id}
+            onClick={onRowClick ? () => onRowClick(m) : undefined}
+            style={onRowClick ? { cursor: 'pointer' } : undefined}
+          >
+            <td><b>{m.name}</b></td>
+            <td><PriorityBadge level={m.pri} /></td>
+            <td className="mu">{m.km == null || m.km === '—' ? '—' : `${m.km} km`}</td>
+            <td>
+              {m.qr == null ? <span className="mu">—</span> : <><span className="qrbar"><i style={{ width: m.qr + '%' }} /></span> {m.qr}</>}
+            </td>
+            <td>{typeof m.trend === 'number' ? <Trend v={m.trend} /> : <span className="mu">{m.trendText ?? '—'}</span>}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
 )
 
 // Items: {s: 'ok' | other, title, sub, t}; an item with `onClick` is clickable (e.g. open the visit).

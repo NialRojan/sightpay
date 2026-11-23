@@ -1,3 +1,4 @@
+import { T } from '../components/Language'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, Brain, CheckCircle2, MapPin, Navigation, Sparkles } from 'lucide-react'
@@ -18,7 +19,7 @@ function ErrorCard({ title, err, onRetry }) {
     <div className="card" style={{ padding: 24 }}>
       <h2>{title}</h2>
       <p className="mu">{errText(err)}</p>
-      {onRetry && <button className="btn" style={{ marginTop: 10 }} onClick={onRetry}>Retry</button>}
+      {onRetry && <button className="btn" style={{ marginTop: 10 }} onClick={onRetry}><T>Retry</T></button>}
     </div>
   )
 }
@@ -118,7 +119,7 @@ export default function MerchantDetail() {
       <div className="pad merchant-page">
         {/* Breadcrumb & Header */}
         <div className="m360-breadcrumb">
-          <span onClick={() => nav('/queue')}>Priority Queue</span>
+          <span onClick={() => nav('/queue')}><T>Priority Queue</T></span>
           <b>/</b>
           <span>{m.name}</span>
         </div>
@@ -131,7 +132,7 @@ export default function MerchantDetail() {
             </div>
             <h1 style={{ marginTop: 6 }}>{m.name}</h1>
             <p className="mu">
-              <MapPin size={13} color="#B7FF3C" /> {m.address || '—'}
+              <MapPin size={13} color="var(--sp-accent)" /> {m.address || '—'}
               {distance != null ? ` · ${fmtKm(distance)} away` : ''} · {m.category || '—'} · Owner: {m.owner_name || '—'}
               {m.phone ? ` (${m.phone})` : ''} · {m.language || '—'} · FSE: {m.assigned_fse_name || 'Unassigned'}
             </p>
@@ -146,7 +147,7 @@ export default function MerchantDetail() {
               title={latestVisit ? `Visit #${latestVisit.id}` : 'No visit yet'}
               onClick={() => latestVisit && nav(`/visits/${latestVisit.id}`)}
             >
-              Open Latest Visit <ArrowRight size={15} />
+              <T>Open Latest Visit</T> <ArrowRight size={15} />
             </button>
           </div>
         </div>
@@ -199,7 +200,7 @@ export default function MerchantDetail() {
           <section className="card chart-panel">
             <div className="row">
               <div>
-                <h2>Transactions Before / After Guidance</h2>
+                <h2><T>Transactions Before / After Guidance</T></h2>
                 <span className="mu sm">Observed daily transaction value around the intervention date</span>
               </div>
               <span className="pill ev">Observed change</span>
@@ -232,7 +233,7 @@ export default function MerchantDetail() {
                 <span className="pill ev">{(SOURCE_LABEL[ctx.source] || 'MEMORY RECALL').toUpperCase()}</span>
                 <h2 style={{ marginTop: 4 }}>AI Executive Summary</h2>
               </div>
-              <Sparkles size={18} color="#B7FF3C" />
+              <Sparkles size={18} color="var(--sp-accent)" />
             </div>
             <p className="summary-text">{ctx.summary || 'No memory recorded for this merchant yet.'}</p>
             <div className="confidence-box">

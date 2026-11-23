@@ -1,8 +1,8 @@
+import { T, useLanguage } from '../components/Language'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Navigation,
-  ChevronDown,
   Camera,
   Map as MapIcon,
   Network,
@@ -869,6 +869,8 @@ function buildMapPoints({ merchants, queue, visits }) {
    ============================================================ */
 
 export default function Fse() {
+  const { t } = useLanguage()
+  const [performanceOpen, setPerformanceOpen] = useState(false)
   const nav = useNavigate()
   const pos = usePosition()
   const fseId = getCurrentFseId()
@@ -950,7 +952,7 @@ export default function Fse() {
           <div className="card" style={{ padding: 24 }}>
             <h2>Unable to load operations</h2>
             <p className="mu">{errText(error)}</p>
-            <button className="btn" style={{ marginTop: 12 }} onClick={() => load(pos)}>Retry</button>
+            <button className="btn" style={{ marginTop: 12 }} onClick={() => load(pos)}><T>Retry</T></button>
           </div>
         </div>
       </Layout>
@@ -961,7 +963,7 @@ export default function Fse() {
     return (
       <Layout crumb="Operations">
         <style>{CSS}</style>
-        <div className="pad sp-blue mu">Loading operations…</div>
+        <div className="pad sp-blue mu"><T>Loading operations…</T></div>
       </Layout>
     )
   }
@@ -1060,179 +1062,172 @@ export default function Fse() {
       <div className="pad sp-blue">
         <div className="head">
           <div>
-            <h1>{greeting()}, {first}</h1>
+            <h1>{t(greeting())}, {first}</h1>
             <p className="mu">
-              Here’s what needs your attention today{fse?.territory ? ` in ${fse.territory}` : ''}.
-              {pos === null ? ' Location unavailable: distances are not shown.' : ''}
+              {[fse?.territory, pos === null ? t('Location unavailable') : null].filter(Boolean).join(' · ')}
             </p>
           </div>
-
-          <div className="grow" />
-
-          <span className="pill ev">
-            <i className="live" />
-            Field mode active
-          </span>
-
-          <button className="btn sel" title="Coverage and performance cover the last 30 days; the queue is today's">
-            Last 30 days
-            <ChevronDown size={15} />
-          </button>
         </div>
 
-        <div className="g4">
-          {kpis.map((k, i) => (
-            <StatCard key={k.k} label={k.k} value={k.v} note={k.d} up={k.up} i={i} />
-          ))}
-        </div>
+        <section className="card sp-next-visit" style={{ '--i': 5 }}>
+          <div className="sp-next-heading">
+            <h2><T>Next Best Visit</T></h2>
+            {nb && <PriorityBadge level={level(nb)} />}
+          </div>
 
-        <div className="g2">
-          <FieldCoverage
-            points={points}
-            visited={cov.visited}
-            assigned={cov.assigned}
-            coveragePct={cov.coverage_pct}
-            priority={high}
-            visitCount={d.visits30.length}
-            center={center}
-            onNavigate={nav}
-          />
-
-          <section className="card next" style={{ '--i': 5 }}>
-            <div className="row">
-              <h2>Next Best Visit</h2>
-              <span className="grow" />
-              {nb && <PriorityBadge level={level(nb)} />}
-            </div>
-
-            {!nb ? (
-              <p className="mu top16">Queue is clear: every assigned merchant has a usable visit today.</p>
-            ) : (
-              <>
-                <div className="row top16">
-                  <div>
-                    <h3>{nb.name}</h3>
-                    <div className="mu sm">
-                      <Navigation size={12} />
-                      {nb.distance_m == null ? 'distance needs your location' : `${(nb.distance_m / 1000).toFixed(1)} km away`} · last
+          {!nb ? (
+            <p className="mu top16"><T>No visits left today.</T></p>
+          ) : (
+            <>
+              <div className="sp-next-merchant">
+                <div>
+                  <h3>{nb.name}</h3>
+                  <div className="mu sm sp-next-meta">
+                    <Navigation size={14} aria-hidden="true" />
+                    <span>
+                      {nb.distance_m == null ? 'Distance needs your location' : `${(nb.distance_m / 1000).toFixed(1)} km away`} · last
                       visit {daysText(nb.days_since_visit)} · priority {nb.priority}
+                    </span>
+                  </div>
+                </div>
+                <ScoreRing value={nb.latest_score} size={72} />
+              </div>
+
+              {!!nb.reasons?.length && (
+                <ul className="sp-next-reasons">
+                  {nb.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                </ul>
+              )}
+
+              <div className="sp-next-recommendation">
+                <span className="mu sm"><T>Recommended action</T></span>
+                <b>
+                  {t(audit?.audit?.recommended_action && audit.audit.recommended_action !== 'none'
+                    ? ACTION_LABEL[audit.audit.recommended_action]
+                    : recommendedAction(nb))}
+                </b>
+                {audit?.error && <div className="mu sm">Latest audit unavailable: {errText(audit.error)}</div>}
+              </div>
+
+              <details className="sp-disclosure">
+                <summary><T>Evidence details</T></summary>
+                <div className="sp-disclosure-content">
+                  <div className="sp-next-details">
+                    <div>
+                      <span className="mu sm"><T>Competitor presence</T></span>
+                      <b>
+                        {!audit
+                          ? '…'
+                          : audit.error
+                            ? '—'
+                            : audit.audit
+                              ? `${audit.audit.competitor || 'None seen'} · ${(audit.audit.competitor_dominance || '—').toUpperCase()}`
+                              : 'No audit yet'}
+                      </b>
+                    </div>
+                    <div>
+                      <span className="mu sm"><T>Evidence</T></span>
+                      <EvidenceIndicator
+                        label={
+                          audit?.visit?.authenticity_score != null
+                            ? `Authenticity ${audit.visit.authenticity_score}/100`
+                            : audit?.visit
+                              ? decisionText(audit.visit.decision)
+                              : 'No visit yet'
+                        }
+                      />
                     </div>
                   </div>
-                  <span className="grow" />
-                  <ScoreRing value={nb.latest_score} />
-                </div>
 
-                <div className="why">
-                  {(nb.reasons || []).map((r) => (
-                    <div key={r}>
-                      <i />
-                      {r}
-                    </div>
-                  ))}
                 </div>
+              </details>
 
-                <div className="two">
-                  <div>
-                    <span className="mu sm">Competitor presence</span>
-                    <b>
-                      {!audit
-                        ? '…'
-                        : audit.error
-                          ? '—'
-                          : audit.audit
-                            ? `${audit.audit.competitor || 'None seen'} · ${(audit.audit.competitor_dominance || '—').toUpperCase()}`
-                            : 'No audit yet'}
-                    </b>
-                  </div>
-                  <div>
-                    <span className="mu sm">Evidence</span>
-                    <EvidenceIndicator
-                      label={
-                        audit?.visit?.authenticity_score != null
-                          ? `Authenticity ${audit.visit.authenticity_score}/100`
-                          : audit?.visit
-                            ? decisionText(audit.visit.decision)
-                            : 'No visit yet'
-                      }
-                    />
-                  </div>
-                </div>
-
-                <div className="rec">
-                  <span className="mu sm">Recommended action</span>
-                  <b>
-                    {audit?.audit?.recommended_action && audit.audit.recommended_action !== 'none'
-                      ? ACTION_LABEL[audit.audit.recommended_action]
-                      : recommendedAction(nb)}
-                  </b>
-                  {audit?.error && <div className="mu sm">Latest audit unavailable: {errText(audit.error)}</div>}
-                </div>
-
-                <div className="row gap">
-                  <button className="btn p grow" onClick={() => nav(`/fse/mobile?merchant=${nb.merchant_id}`)}>
-                    <Camera size={16} />
-                    START VISIT
-                  </button>
-                  <button className="btn" onClick={() => nav(`/merchants/${nb.merchant_id}`)}>
-                    VIEW MERCHANT
-                  </button>
-                </div>
-              </>
-            )}
-          </section>
-        </div>
+              <div className="sp-next-actions">
+                <button className="btn p" onClick={() => nav(`/fse/mobile?merchant=${nb.merchant_id}`)}>
+                  <Camera size={16} />
+                  <T>Start visit</T>
+                </button>
+                <button className="btn" onClick={() => nav(`/merchants/${nb.merchant_id}`)}>
+                  <T>View merchant</T>
+                </button>
+              </div>
+            </>
+          )}
+        </section>
 
         <div className="g2">
           <section className="card" style={{ '--i': 6 }}>
             <div className="row">
-              <h2>AI Priority Queue</h2>
+              <h2><T>Today’s visits</T></h2>
               <span className="grow" />
               <button className="lnk" onClick={() => nav('/fse/queue')}>
-                View all
+                <T>View all</T>
               </button>
             </div>
             {tableRows.length ? (
               <PriorityTable rows={tableRows} trendLabel="Last visit" onRowClick={(m) => nav(`/merchants/${m.id}`)} />
             ) : (
-              <p className="mu">Nothing left in today's queue.</p>
+              <p className="mu"><T>No visits left today.</T></p>
             )}
           </section>
 
           <section className="card" style={{ '--i': 7 }}>
-            <h2>Visit Activity</h2>
+            <h2><T>Visit Activity</T></h2>
             {activity.length ? <ActivityTimeline items={activity} /> : <p className="mu">No visits recorded yet.</p>}
           </section>
         </div>
 
-        <div className="g2">
-          <section className="card" style={{ '--i': 8 }}>
-            <h2>Merchant Health</h2>
-            <HealthGraph data={health} />
-          </section>
-
-          <section className="card" style={{ '--i': 9 }}>
-            <h2>AI Alerts</h2>
-            {alerts.length ? alerts.map((a) => <AlertCard key={a.key} a={a} />) : <p className="mu">No open alerts.</p>}
-          </section>
-        </div>
-
-        <div className="g4">
-          {mini.map((k, i) => (
-            <div key={k.k} className="card mini" style={{ '--i': 10 + i }}>
-              <span className="mu sm">{k.k}</span>
-              <b className={k.warn ? 'red' : ''}>{k.v}</b>
+        <details className="sp-disclosure" onToggle={(event) => setPerformanceOpen(event.currentTarget.open)}>
+          <summary><T>Activity and performance</T></summary>
+          <div className="sp-disclosure-content">
+            <div className="g4">
+              {kpis.map((k, i) => (
+                <StatCard key={k.k} label={k.k} value={k.v} note={k.d} up={k.up} i={i} />
+              ))}
             </div>
-          ))}
-        </div>
 
-        <section className="card" style={{ '--i': 14 }}>
-          <div className="row">
-            <h2>Recent Incentives</h2>
-            <span className="grow" />
-            <span className="mu sm">Total earned {fmtInr(d.incentives.total_inr)}</span>
+              {performanceOpen && <FieldCoverage
+                points={points}
+                visited={cov.visited}
+                assigned={cov.assigned}
+                coveragePct={cov.coverage_pct}
+                priority={high}
+                visitCount={d.visits30.length}
+                center={center}
+                onNavigate={nav}
+              />}
+
+            <div className="g2">
+              <section className="card" style={{ '--i': 8 }}>
+                <h2><T>Merchant Health</T></h2>
+                <HealthGraph data={health} />
+              </section>
+
+              <section className="card" style={{ '--i': 9 }}>
+                <h2><T>AI Alerts</T></h2>
+                {alerts.length ? alerts.map((a) => <AlertCard key={a.key} a={a} />) : <p className="mu">No open alerts.</p>}
+              </section>
+            </div>
+
+            <div className="g4">
+              {mini.map((k, i) => (
+                <div key={k.k} className="card mini" style={{ '--i': 10 + i }}>
+                  <span className="mu sm">{k.k}</span>
+                  <b className={k.warn ? 'red' : ''}>{k.v}</b>
+                </div>
+              ))}
+            </div>
+
+            <section className="card" style={{ '--i': 14 }}>
+              <div className="row">
+                <h2><T>Recent Incentives</T></h2>
+                <span className="grow" />
+                <span className="mu sm">Total earned {fmtInr(d.incentives.total_inr)}</span>
+              </div>
+              {incentiveItems.length ? <ActivityTimeline items={incentiveItems} /> : <p className="mu">No incentives yet.</p>}
+            </section>
           </div>
-          {incentiveItems.length ? <ActivityTimeline items={incentiveItems} /> : <p className="mu">No incentives yet.</p>}
-        </section>
+        </details>
       </div>
     </Layout>
   )
@@ -1376,11 +1371,32 @@ const CSS = `
 .sp-blue td{border-color:var(--line)}
 .sp-blue :focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 
+/* ---------- next best visit ---------- */
+.sp .sp-next-visit{display:flex;flex-direction:column;gap:14px;min-width:0}
+.sp-next-heading,.sp-next-merchant{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.sp-next-visit h2,.sp-next-visit h3,.sp-next-visit p{margin:0}
+.sp-next-heading .pill{flex:none}
+.sp-next-merchant h3{overflow-wrap:anywhere}
+.sp-next-meta{display:flex;align-items:baseline;gap:6px;margin-top:4px;line-height:1.5}
+.sp-next-meta svg{flex:none;align-self:flex-start;margin-top:3px}
+.sp-next-visit .ring{flex:none;box-shadow:none}
+.sp-next-reasons,.sp-next-details > div,.sp-next-recommendation{
+  background:var(--mist);border:1px solid var(--line);border-radius:12px;padding:10px 12px;overflow-wrap:anywhere;
+}
+.sp-next-reasons{display:grid;gap:4px;margin:0;padding-inline-start:30px;list-style:disc;font-size:13px;line-height:1.45}
+.sp-next-reasons li::marker{color:var(--blue)}
+.sp-next-details,.sp-next-actions{display:flex;flex-wrap:wrap;gap:8px}
+.sp-next-details > div,.sp-next-actions > button{flex:1 1 144px;min-width:0}
+.sp-next-details > div,.sp-next-recommendation{display:grid;justify-items:start;align-content:start;gap:4px;font-size:13px}
+.sp-next-details .pill{max-width:100%;white-space:normal}
+.sp-next-actions{margin-top:auto}
+.sp-next-actions > button{justify-content:center;white-space:normal;text-align:center}
+
 /* ---------- field card ---------- */
 .sp-blue .sp-field{padding:0;overflow:hidden}
 .sp-head{display:flex;align-items:flex-start;gap:14px;padding:22px 24px 18px}
 .sp-head-ico{width:40px;height:40px;flex:none;border-radius:12px;display:grid;place-items:center;color:#070909;
-  background:var(--blue);box-shadow:0 10px 20px -10px rgba(183,255,60,.4)}
+  background:var(--blue);box-shadow:0 10px 20px -10px rgb(40 86 237 / 40%)}
 .sp-head h2{margin:0;font-size:18px;display:flex;align-items:center;gap:10px}
 .sp-sub{margin-top:4px;font-size:12.5px;color:var(--ink2)}
 .sp-live{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:99px;background:var(--mist);

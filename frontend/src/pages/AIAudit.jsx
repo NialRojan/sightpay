@@ -1,3 +1,4 @@
+import { T } from '../components/Language'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -334,7 +335,7 @@ function VisitAIAudit({ id }) {
         title={v.status === 'analyzing' || busy ? 'Vision AI is still analyzing' : 'No audit for this visit yet'}
         message={`Visit #${v.id} at ${v.merchant_name} is ${statusLabel(v.status).toLowerCase()}. ${v.status === 'submitted' || v.status === 'failed' ? 'Run the analysis from the visit page.' : ''}`}
       >
-        <Link to={`/visits/${v.id}`} className="btn">Visit Evidence</Link>
+        <Link to={`/visits/${v.id}`} className="btn"><T>Visit Evidence</T></Link>
       </AuditState>
     )
   }
@@ -356,7 +357,7 @@ function VisitAIAudit({ id }) {
         <div className="audit-breadcrumb">
           <Link to="/fse/audits" className="audit-back">
             <ArrowLeft size={15} />
-            AI Audits
+            <T>AI Audits</T>
           </Link>
           <span className="mu">/</span>
           <span className="mu">Visit #{v.id}</span>
@@ -379,7 +380,7 @@ function VisitAIAudit({ id }) {
           </div>
 
           <div className="audit-actions">
-            <Link to={`/visits/${v.id}`} className="btn">Visit Evidence</Link>
+            <Link to={`/visits/${v.id}`} className="btn"><T>Visit Evidence</T></Link>
             <Link to={`/merchants/${v.merchant_id}`} className="btn p">
               Merchant 360
               <ArrowRight size={14} />
@@ -423,7 +424,7 @@ function VisitAIAudit({ id }) {
                 <div className="audit-card-heading">
                   <div>
                     <div className="eyebrow">VISION AI</div>
-                    <h2>Counter Audit</h2>
+                    <h2><T>Counter Audit</T></h2>
                     <span className="mu sm">Structured analysis of the captured merchant counter.</span>
                   </div>
                   <Sparkles size={19} color="#1F5BFF" />
@@ -457,7 +458,7 @@ function VisitAIAudit({ id }) {
               <div className="audit-card-heading">
                 <div>
                   <div className="eyebrow">EVIDENCE GATE</div>
-                  <h2>Visit Verification</h2>
+                  <h2><T>Visit Verification</T></h2>
                 </div>
                 <ShieldCheck size={18} color="#1F5BFF" />
               </div>
@@ -497,7 +498,7 @@ function VisitAIAudit({ id }) {
               <div className="audit-card-heading">
                 <div>
                   <div className="eyebrow">DECISION ENGINE</div>
-                  <h2>Action Pipeline</h2>
+                  <h2><T>Action Pipeline</T></h2>
                 </div>
                 <Zap size={18} color="#1F5BFF" />
               </div>
@@ -647,7 +648,7 @@ function AuditsHome() {
         <div className="audit-header">
           <div className="audit-title-wrap">
             <div className="eyebrow">COMPUTER VISION · AI AUDITS</div>
-            <h1>AI Audits</h1>
+            <h1><T>AI Audits</T></h1>
             <div className="audit-title-meta">
               <span className="mu">Audit a counter photo without creating a visit, or open a visit&apos;s audit.</span>
             </div>
@@ -679,7 +680,7 @@ function AuditsHome() {
                 <div className="audit-card-heading">
                   <div>
                     <div className="eyebrow">VISION AI</div>
-                    <h2>Audit a photo</h2>
+                    <h2><T>Audit a photo</T></h2>
                     <span className="mu sm">Runs the same Vision AI audit as a visit (POST /audit/analyze-image).</span>
                   </div>
                   <Sparkles size={19} color="#1F5BFF" />
@@ -710,7 +711,7 @@ function AuditsHome() {
               <div className="audit-card-heading">
                 <div>
                   <div className="eyebrow">EVIDENCE GATE</div>
-                  <h2>Flagged visits</h2>
+                  <h2><T>Flagged visits</T></h2>
                   <span className="mu sm">Authenticity review required or blocked</span>
                 </div>
                 <ShieldCheck size={18} color="#1F5BFF" />
@@ -722,7 +723,7 @@ function AuditsHome() {
               <div className="audit-card-heading">
                 <div>
                   <div className="eyebrow">VISION AI</div>
-                  <h2>Recent visit audits</h2>
+                  <h2><T>Recent visit audits</T></h2>
                 </div>
                 <Eye size={18} color="#1F5BFF" />
               </div>

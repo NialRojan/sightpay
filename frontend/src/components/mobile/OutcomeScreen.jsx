@@ -43,7 +43,7 @@ export function OutcomeScreen({ visit, retrying, retryError, onRetry, onBack, on
           {photo ? (
             <img src={photo} alt="Submitted counter" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 10 }} />
           ) : (
-            <ShieldCheck size={16} color="#B7FF3C" />
+            <ShieldCheck size={16} color="var(--sp-accent)" />
           )}
           <div>
             <b>
@@ -62,7 +62,7 @@ export function OutcomeScreen({ visit, retrying, retryError, onRetry, onBack, on
         {/* compliant -> incentive */}
         {decision === 'compliant' && (
           <div className="m6-incentive">
-            <Wallet size={16} color="#B7FF3C" />
+            <Wallet size={16} color="var(--sp-accent)" />
             <div>
               <b>{inc ? `Incentive approved: ${fmtInr(inc.amount_inr)}` : 'Compliant: no incentive recorded'}</b>
               <span className="mu xs" style={{ display: 'block' }}>
@@ -135,7 +135,7 @@ export function OutcomeScreen({ visit, retrying, retryError, onRetry, onBack, on
 
             <div className="m6-guidance">
               <div className="m6-g-head">
-                <Languages size={14} color="#B7FF3C" />
+                <Languages size={14} color="var(--sp-accent)" />
                 <span>MERCHANT GUIDANCE ({(LANGUAGE_NAME[iv.message_language] || iv.message_language || '').toUpperCase()})</span>
               </div>
               <p className="m6-hindi" lang={iv.message_language}>“{iv.message_text}”</p>
@@ -188,7 +188,7 @@ export function OutcomeScreen({ visit, retrying, retryError, onRetry, onBack, on
         </div>
 
         <div className="m6-done-box">
-          <CheckCircle2 size={24} color="#B7FF3C" />
+          <CheckCircle2 size={24} color="var(--sp-accent)" />
           <h3>Visit recorded</h3>
           <p className="mu sm" style={{ fontSize: 12 }}>
             Merchant memory updated.
